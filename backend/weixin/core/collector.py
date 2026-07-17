@@ -1257,6 +1257,12 @@ def stop_local_ocr_worker() -> None:
             proc.kill()
         except Exception:
             pass
+    stderr_fh = getattr(proc, "_stderr_fh", None)
+    if stderr_fh is not None and stderr_fh is not subprocess.DEVNULL:
+        try:
+            stderr_fh.close()
+        except Exception:
+            pass
 
 
 atexit.register(stop_local_ocr_worker)
@@ -1269,16 +1275,26 @@ def get_local_ocr_worker():
     if _LOCAL_OCR_WORKER is not None:
         stop_local_ocr_worker()
 
+    # stderr 不可用 PIPE：ocr_worker 把大量日志打到 stderr，不读会塞满管道导致死锁超时
+    log_path = os.path.join(os.path.dirname(OCR_WORKER_PATH), ".paddlex-cache", "ocr_worker.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    try:
+        stderr_fh = open(log_path, "a", encoding="utf-8", errors="replace")
+    except OSError:
+        stderr_fh = subprocess.DEVNULL
+
     _LOCAL_OCR_WORKER = subprocess.Popen(
         [sys.executable, OCR_WORKER_PATH],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=stderr_fh,
         text=True,
         encoding="utf-8",
         errors="replace",
         bufsize=1,
     )
+    # 保持句柄存活到子进程结束（Windows 上过早 close 可能影响子进程写日志）
+    _LOCAL_OCR_WORKER._stderr_fh = stderr_fh  # type: ignore[attr-defined]
     return _LOCAL_OCR_WORKER
 
 

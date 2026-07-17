@@ -343,7 +343,34 @@ async def connect_device_auto_v2(session):
             print(f"[连接] 当前 WLAN IP 直连成功: {adb_ip}:{PHONE_PORT}")
             return True
 
-    print("[连接] LocalIP 直连失败，开始扫描设备 ...")
+    # LocalIP 不可用时优先走 ADB 反向隧道（部分机型 WiFi 端口通但 MCP 协议不可用）
+    adb_targets: list[str] = []
+    if _CURRENT_DEVICE_SERIAL:
+        adb_targets.append(_CURRENT_DEVICE_SERIAL)
+    # USB serial / WiFi adb 地址
+    try:
+        proc = subprocess.run(
+            [*_adb_args(), "devices"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+        )
+        for line in (proc.stdout or "").splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device" and parts[0] not in adb_targets:
+                adb_targets.append(parts[0])
+    except Exception as e:
+        print(f"[连接] 枚举 ADB 设备失败: {e}")
+
+    for target in adb_targets:
+        print(f"[连接] 尝试 ADB 模式连接 {target} ...")
+        adb_result = await session.call_tool(
+            "connect_device",
+            {"ip": target, "connection_mode": "ADB"},
+        )
+        if _tool_call_succeeded(adb_result):
+            print(f"[连接] ADB 连接成功: {target}")
+            return True
+
+    print("[连接] LocalIP/ADB 直连失败，开始扫描设备 ...")
     result = await session.call_tool("scan_devices", {"port": PHONE_PORT})
     for item in result.content:
         if getattr(item, "type", "") != "text":

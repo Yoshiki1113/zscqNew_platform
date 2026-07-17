@@ -8,12 +8,17 @@ sqlalchemy>=2.0
 aiomysql>=0.2.0
 cryptography>=41.0  # aiomysql + MySQL 8.0 密码认证所需
 
+# 环境变量
+python-dotenv>=1.0.0
+
 # 异步支持
 httpx>=0.27.0
 
 # 文件处理
 aiofiles>=23.0
 python-multipart>=0.0.9
+openpyxl>=3.1.0  # 侵权线索 / 工单 Excel 导入
+python-docx>=1.1.0  # 工单包台词 docx 抽取
 
 # 图像处理
 Pillow>=9.0.0
@@ -24,5 +29,18 @@ numpy>=1.24.0
 paddlepaddle>=3.0.0
 paddleocr>=2.9.0
 
-# 日志
+# 日志 / 进程
 loguru>=0.7.0
+psutil>=5.9.0
+
+# AScript MCP 客户端（手机自动化通信）
+mcp>=1.0.0
+
+# ASR 台词比对
+pypinyin>=0.50.0
+rapidfuzz>=3.0.0
+websocket-client>=1.6.0  # 讯飞云 ASR（import websocket）
+
+# 说明：
+# ascript_mcp / ascript 通常需从开发机拷贝到 conda site-packages，
+# 不在 PyPI 标准安装范围内，见 Windows部署指南.md

@@ -35,6 +35,7 @@ class Task(Base):
     skip_search = Column(Boolean, default=False, comment="是否跳过搜索直接从当前视频采集")
     collect_mode = Column(String(20), default="link_first", comment="link_first（二阶段采集）")
     phase = Column(Integer, default=1, comment="1=阶段一（链接采集） 2=阶段二（视频取证）")
+    work_order_id = Column(Integer, nullable=True, index=True, comment="关联工单ID")
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -125,6 +126,12 @@ class EvidenceRecord(Base):
     reviewer = Column(String(100), default="")
     review_notes = Column(Text, default="")
     reviewed_at = Column(DateTime, nullable=True)
+    pushed_to_police = Column(Boolean, default=False, comment="是否已推送公安")
+    pushed_at = Column(DateTime, nullable=True)
+    pushed_by = Column(String(100), default="")
+    pushed_to_company = Column(Boolean, default=False, comment="是否已推送公司核查池")
+    pushed_to_company_at = Column(DateTime, nullable=True)
+    pushed_to_company_by = Column(String(100), default="")
     created_at = Column(DateTime, default=datetime.now)
 
     task = relationship(
@@ -231,14 +238,54 @@ class VideoLink(Base):
     created_at = Column(DateTime, default=datetime.now)
     collected_at = Column(DateTime, nullable=True)
 
-    task = relationship(
-        "Task", backref="video_links",
-        primaryjoin="VideoLink.task_id == Task.id",
-        foreign_keys="[VideoLink.task_id]",
-    )
-    batch = relationship(
-        "LinkBatch", backref="video_links",
-        primaryjoin="VideoLink.batch_id == LinkBatch.id",
-        foreign_keys="[VideoLink.batch_id]",
-    )
 
+class WorkOrder(Base):
+    """公司端提交的取证工单"""
+    __tablename__ = "work_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_no = Column(String(32), unique=True, index=True, comment="工单号")
+    drama_name = Column(String(200), nullable=False, comment="剧名/搜索关键词")
+    description = Column(Text, default="", comment="诉求说明")
+    priority = Column(Integer, default=0, comment="优先级，越大越优先")
+    deadline = Column(DateTime, nullable=True)
+    status = Column(
+        String(20),
+        default="draft",
+        comment="draft|submitted|collecting|partial|completed|closed",
+    )
+    submitter = Column(String(100), default="")
+    assigned_to = Column(String(100), default="")
+    evidence_count = Column(Integer, default=0)
+    company_pushed_count = Column(Integer, default=0, comment="已推送公司核查池条数")
+    pushed_count = Column(Integer, default=0, comment="已推送公安条数")
+    submitted_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class WorkOrderAttachment(Base):
+    """工单附件（剧本、权属证明等）"""
+    __tablename__ = "work_order_attachments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    work_order_id = Column(Integer, nullable=False, index=True)
+    file_name = Column(String(255), default="")
+    file_type = Column(String(50), default="", comment="script|license|clue|link|other")
+    file_path = Column(String(500), default="")
+    file_size = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+VideoLink.task = relationship(
+    "Task", backref="video_links",
+    primaryjoin="VideoLink.task_id == Task.id",
+    foreign_keys="[VideoLink.task_id]",
+)
+VideoLink.batch = relationship(
+    "LinkBatch", backref="video_links",
+    primaryjoin="VideoLink.batch_id == LinkBatch.id",
+    foreign_keys="[VideoLink.batch_id]",
+)

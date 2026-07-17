@@ -13,6 +13,14 @@
       </el-space>
     </div>
 
+    <el-alert
+      v-if="workOrderId"
+      type="warning"
+      :closable="false"
+      :title="`当前为工单 #${workOrderId} 取证：请选择对应批次后创建二阶段任务`"
+      style="margin-bottom:16px;"
+    />
+
     <!-- 批次列表 -->
     <div class="card" v-loading="loading">
       <div class="card-body no-pad" v-if="batches.length">
@@ -27,6 +35,7 @@
             <template #default="{row}">
               <el-tag v-if="row.source === 'collected'" type="primary" size="small">自动采集</el-tag>
               <el-tag v-else-if="row.source === 'imported'" type="warning" size="small">Excel导入</el-tag>
+              <el-tag v-else-if="row.source === 'work_order'" type="danger" size="small">工单导入</el-tag>
               <el-tag v-else type="success" size="small">手动添加</el-tag>
             </template>
           </el-table-column>
@@ -155,8 +164,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, FolderOpened } from '@element-plus/icons-vue'
 import { linkPoolApi, taskApi, deviceApi } from '@/api/index'
@@ -164,7 +173,9 @@ import { formatDateTime } from '@/utils/time'
 import { useAppStore } from '@/stores/app'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
+const workOrderId = ref(parseInt(route.query.work_order_id) || 0)
 
 const loading = ref(false)
 const batches = ref([])
@@ -238,6 +249,15 @@ async function loadBatches() {
     const { data } = await linkPoolApi.listBatches()
     batches.value = data?.batches || []
     unimportedClueCount.value = data?.unimported_clue_count || 0
+    await nextTick()
+    const batchId = parseInt(route.query.batch_id) || 0
+    if (batchId && tableRef.value) {
+      const batch = batches.value.find(b => b.id === batchId)
+      if (batch) {
+        tableRef.value.toggleRowSelection(batch, true)
+        if (route.query.keyword) configForm.keyword = route.query.keyword
+      }
+    }
   } catch {
     batches.value = []
   } finally {
@@ -308,6 +328,7 @@ async function confirmCreateAndStart() {
       hold_seconds: Math.round(configForm.holdMinutes * 60),
       capture_method: 'scrcpy',
       enable_asr: configForm.enableAsr,
+      work_order_id: workOrderId.value || undefined,
     })
     showConfigDialog.value = false
     if (data.id) {
@@ -322,7 +343,7 @@ async function confirmCreateAndStart() {
       } catch (e2) {
         ElMessage.warning('任务已创建，但自动启动失败，请手动启动')
       }
-      router.push(`/tasks/${data.id}`)
+      router.push(`/collector/tasks/${data.id}`)
     }
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '创建失败')

@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import select, func
+from pydantic import BaseModel, Field
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import EvidenceRecord
+from models import EvidenceRecord, Task
 
 router = APIRouter(tags=["证据查询"])
 
@@ -58,6 +59,10 @@ def _record_to_list_item(r: EvidenceRecord) -> dict:
         "screenshots": r.screenshots,
         # 复核
         "review_status": r.review_status or "",
+        "pushed_to_police": bool(getattr(r, "pushed_to_police", False)),
+        "pushed_at": str(r.pushed_at) if getattr(r, "pushed_at", None) else "",
+        "pushed_to_company": bool(getattr(r, "pushed_to_company", False)),
+        "pushed_to_company_at": str(r.pushed_to_company_at) if getattr(r, "pushed_to_company_at", None) else "",
         # 时间
         "capture_timestamp": r.capture_timestamp or "",
         "created_at": str(r.created_at) if r.created_at else "",
@@ -123,6 +128,12 @@ def _record_to_dict(r: EvidenceRecord) -> dict:
         "reviewer": r.reviewer or "",
         "review_notes": r.review_notes or "",
         "reviewed_at": str(r.reviewed_at) if r.reviewed_at else "",
+        "pushed_to_police": bool(getattr(r, "pushed_to_police", False)),
+        "pushed_at": str(r.pushed_at) if getattr(r, "pushed_at", None) else "",
+        "pushed_to_company": bool(getattr(r, "pushed_to_company", False)),
+        "pushed_to_company_at": str(r.pushed_to_company_at) if getattr(r, "pushed_to_company_at", None) else "",
+        "pushed_by": getattr(r, "pushed_by", "") or "",
+        "pushed_to_company_by": getattr(r, "pushed_to_company_by", "") or "",
         "capture_timestamp": r.capture_timestamp or "",
         "created_at": str(r.created_at) if r.created_at else "",
     }
@@ -134,6 +145,11 @@ async def list_evidence(
     keyword: str = Query("", max_length=200),
     blogger: str = Query("", max_length=200),
     task_id: int = Query(0, ge=0),
+    work_order_id: int = Query(0, ge=0),
+    pushed_only: bool = Query(False),
+    company_pool_only: bool = Query(False),
+    review_pending: bool = Query(False),
+    phase: int = Query(0, ge=0, le=2),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -152,6 +168,18 @@ async def list_evidence(
         filters.append(EvidenceRecord.blogger_name.like(f"%{blogger}%"))
     if task_id:
         filters.append(EvidenceRecord.task_id == task_id)
+    if work_order_id:
+        task_ids_subq = select(Task.id).where(Task.work_order_id == work_order_id)
+        filters.append(EvidenceRecord.task_id.in_(task_ids_subq))
+    if pushed_only:
+        filters.append(EvidenceRecord.pushed_to_police == True)
+    if company_pool_only:
+        filters.append(EvidenceRecord.pushed_to_company == True)
+    if review_pending:
+        filters.append(EvidenceRecord.review_status == "")
+    if phase:
+        task_ids_phase = select(Task.id).where(Task.phase == phase)
+        filters.append(EvidenceRecord.task_id.in_(task_ids_phase))
 
     for f in filters:
         base = base.where(f)
@@ -205,3 +233,143 @@ async def get_evidence(evidence_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "证据不存在")
 
     return _record_to_dict(row)
+
+
+class PushEvidenceRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+    pushed_by: str = Field("取证员", max_length=100)
+
+
+class PushCompanyAllRequest(BaseModel):
+    pushed_by: str = Field("取证员", max_length=100)
+    task_id: Optional[int] = Field(None, ge=1)
+    work_order_id: Optional[int] = Field(None, ge=1)
+
+
+@router.post("/evidence/push-company-all")
+async def push_all_evidence_to_company(
+    body: PushCompanyAllRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """取证端：一键推送全部未推送的二阶段证据至公司核查池"""
+    phase2_ids = select(Task.id).where(Task.phase == 2)
+    if body.task_id:
+        phase2_ids = select(Task.id).where(Task.id == body.task_id, Task.phase == 2)
+    elif body.work_order_id:
+        phase2_ids = select(Task.id).where(
+            Task.work_order_id == body.work_order_id,
+            Task.phase == 2,
+        )
+
+    q = select(EvidenceRecord).where(
+        EvidenceRecord.task_id.in_(phase2_ids),
+        EvidenceRecord.pushed_to_company == False,
+    )
+    rows = (await db.execute(q)).scalars().all()
+    if not rows:
+        return {"updated": 0, "skipped": 0, "total": 0, "message": "没有待推送的二阶段证据"}
+
+    now = datetime.now()
+    updated = 0
+    work_order_ids: set[int] = set()
+    for r in rows:
+        r.pushed_to_company = True
+        r.pushed_to_company_at = now
+        r.pushed_to_company_by = body.pushed_by
+        updated += 1
+        task = (await db.execute(select(Task).where(Task.id == r.task_id))).scalar_one_or_none()
+        if task and task.work_order_id:
+            work_order_ids.add(task.work_order_id)
+
+    await db.commit()
+    from api.work_orders import _refresh_work_order_stats
+    for woid in work_order_ids:
+        await _refresh_work_order_stats(db, woid)
+    await db.commit()
+
+    return {
+        "updated": updated,
+        "skipped": 0,
+        "total": updated,
+        "message": f"已一键推送 {updated} 条至公司核查池",
+    }
+
+
+@router.post("/evidence/push-company")
+async def push_evidence_to_company(body: PushEvidenceRequest, db: AsyncSession = Depends(get_db)):
+    """取证端：推送二阶段证据至公司核查池"""
+    now = datetime.now()
+    result = await db.execute(
+        select(EvidenceRecord).where(EvidenceRecord.id.in_(body.ids))
+    )
+    rows = result.scalars().all()
+    if not rows:
+        raise HTTPException(404, "未找到证据记录")
+
+    updated = 0
+    skipped = 0
+    work_order_ids: set[int] = set()
+    for r in rows:
+        if r.pushed_to_company:
+            continue
+        task = (await db.execute(select(Task).where(Task.id == r.task_id))).scalar_one_or_none()
+        if not task or (task.phase or 1) != 2:
+            skipped += 1
+            continue
+        r.pushed_to_company = True
+        r.pushed_to_company_at = now
+        r.pushed_to_company_by = body.pushed_by
+        updated += 1
+        if task.work_order_id:
+            work_order_ids.add(task.work_order_id)
+
+    if updated == 0 and skipped > 0:
+        raise HTTPException(400, "仅二阶段任务产出的证据可推送公司核查池")
+
+    await db.commit()
+
+    from api.work_orders import _refresh_work_order_stats
+    for woid in work_order_ids:
+        await _refresh_work_order_stats(db, woid)
+    await db.commit()
+
+    return {"updated": updated, "skipped": skipped, "total": len(body.ids)}
+
+
+@router.post("/evidence/push")
+async def push_evidence_to_police(body: PushEvidenceRequest, db: AsyncSession = Depends(get_db)):
+    """取证端：推送证据至公安线索池（平台内可见）"""
+    now = datetime.now()
+    result = await db.execute(
+        select(EvidenceRecord).where(EvidenceRecord.id.in_(body.ids))
+    )
+    rows = result.scalars().all()
+    if not rows:
+        raise HTTPException(404, "未找到证据记录")
+
+    updated = 0
+    work_order_ids: set[int] = set()
+    for r in rows:
+        if r.pushed_to_police:
+            continue
+        if not r.pushed_to_company or r.review_status != "侵权":
+            continue
+        r.pushed_to_police = True
+        r.pushed_at = now
+        r.pushed_by = body.pushed_by
+        updated += 1
+        task = (await db.execute(select(Task).where(Task.id == r.task_id))).scalar_one_or_none()
+        if task and task.work_order_id:
+            work_order_ids.add(task.work_order_id)
+
+    if updated == 0:
+        raise HTTPException(400, "仅「已送核查池且公司标侵权」的证据可推送公安")
+
+    await db.commit()
+
+    from api.work_orders import _refresh_work_order_stats
+    for woid in work_order_ids:
+        await _refresh_work_order_stats(db, woid)
+    await db.commit()
+
+    return {"updated": updated, "total": len(body.ids)}

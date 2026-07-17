@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -22,6 +23,7 @@ class CreateFromPoolRequest(BaseModel):
     hold_seconds: int = Field(DEFAULT_HOLD_SECONDS, ge=30, le=3600)
     capture_method: str = Field(DEFAULT_CAPTURE_METHOD, pattern="^(scrcpy)$")
     enable_asr: bool = Field(True)
+    work_order_id: Optional[int] = Field(None, ge=1)
 
 
 # ── 批次列表 ──
@@ -275,6 +277,7 @@ async def create_task_from_pool(
         collect_mode="link_first",
         phase=2,
         status="links_collected",
+        work_order_id=body.work_order_id,
         created_at=datetime.now(),
     )
     db.add(task)

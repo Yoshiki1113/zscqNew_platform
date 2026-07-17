@@ -1,8 +1,35 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">证据列表</h1>
+  <div :class="['page-container', { 'embed-mode': hideChrome }]">
+    <div class="page-header" v-if="!hideChrome">
+      <h1 class="page-title">{{ isCompany ? '工单证据' : '证据列表' }}</h1>
       <el-space>
+        <el-button
+          v-if="!isCompany"
+          type="success"
+          size="small"
+          :loading="pushingAllCompany"
+          @click="pushAllCompany"
+        >
+          一键推送公司复核
+        </el-button>
+        <el-button
+          v-if="!isCompany && selectedIds.length"
+          type="primary"
+          size="small"
+          :loading="batchPushingCompany"
+          @click="pushBatchCompany"
+        >
+          批量推送公司（{{ selectedIds.length }}）
+        </el-button>
+        <el-button
+          v-if="!isCompany && policeEligibleCount"
+          type="warning"
+          size="small"
+          :loading="batchPushing"
+          @click="pushBatchPolice"
+        >
+          批量推送公安（{{ policeEligibleCount }}）
+        </el-button>
         <el-tag type="primary" effect="light">共 {{ stats.total || total }} 条</el-tag>
         <el-tag type="warning" effect="light" v-if="(stats.high || 0) + (stats.mid || 0) > 0">
           {{ (stats.high || 0) + (stats.mid || 0) }} 条待审核
@@ -14,7 +41,7 @@
     </div>
 
     <!-- 统计卡片 -->
-    <div class="stat-grid">
+    <div class="stat-grid" v-if="!hideChrome">
       <div class="stat-card">
         <div class="stat-icon"><el-icon :size="22"><Document /></el-icon></div>
         <div class="stat-body">
@@ -53,9 +80,9 @@
     </div>
 
     <!-- 筛选 + 排序 -->
-    <div class="card">
+    <div class="card" v-if="!hideChrome || isCompany">
       <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <el-select v-model="filters.taskId" placeholder="选择任务" clearable filterable style="width:240px;" @change="onFilterChange">
+        <el-select v-if="!isCompany" v-model="filters.taskId" placeholder="选择任务" clearable filterable style="width:240px;" @change="onFilterChange">
           <el-option
             v-for="t in taskOptions"
             :key="t.id"
@@ -81,8 +108,23 @@
 
     <!-- 证据卡片列表 -->
     <div v-loading="loading">
-      <div v-for="item in items" :key="item.id" :class="['card', 'evidence-card', reviewBorder(item)]" @click="openDetail(item.id)">
+      <div
+        v-for="item in items"
+        :key="item.id"
+        :class="['card', 'evidence-card', reviewBorder(item)]"
+        @click="openDetail(item.id)"
+      >
         <div style="display:flex;">
+          <div
+            v-if="!isCompany"
+            class="select-box"
+            @click.stop
+          >
+            <el-checkbox
+              :model-value="selectedIds.includes(item.id)"
+              @update:model-value="(v) => toggleSelect(item.id, v)"
+            />
+          </div>
           <!-- 缩略图 -->
           <div class="evidence-thumb">
             <img v-if="getFirstScreen(item)" :src="`/files/${getFirstScreen(item)}`" />
@@ -101,6 +143,8 @@
               </el-tag>
               <span class="text-muted" style="font-size:12px;">{{ formatDateTimeShort(item.capture_timestamp) || formatDateTimeShort(item.created_at) }}</span>
               <span v-if="item.company_full_name" class="text-muted" style="font-size:12px;">{{ item.company_full_name }}</span>
+              <el-tag v-if="item.pushed_to_company" type="primary" size="small" effect="plain">已送核查池</el-tag>
+              <el-tag v-if="item.pushed_to_police" type="success" size="small" effect="plain">已推送公安</el-tag>
             </div>
             <div v-if="item.infringement_reason" style="font-size:13px;color:#f56c6c;margin-bottom:4px;font-weight:700;line-height:1.5;">
               <el-icon><WarningFilled /></el-icon> <strong>{{ item.infringement_reason }}</strong>
@@ -128,10 +172,25 @@
               <span v-if="item.target_blogger_name" style="font-size:12px;"> → {{ item.target_blogger_name }}</span>
             </el-alert>
             <div style="margin-top:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <el-button size="small" type="danger" @click.stop="quickReview(item, '侵权')">侵权</el-button>
-              <el-button size="small" type="success" @click.stop="quickReview(item, '未侵权')">未侵权</el-button>
-              <el-button v-if="item.review_status" size="small" @click.stop="quickReview(item, '')">撤销</el-button>
+              <template v-if="!isCompany">
+                <el-button
+                  v-if="!item.pushed_to_company"
+                  size="small"
+                  type="primary"
+                  @click.stop="pushOneCompany(item)"
+                >推送公司</el-button>
+                <el-button
+                  v-if="canPushPolice(item)"
+                  size="small"
+                  type="warning"
+                  @click.stop="pushOnePolice(item)"
+                >推送公安</el-button>
+                <el-tag v-else-if="item.pushed_to_company && item.review_status !== '侵权'" type="info" size="small" effect="plain">
+                  {{ item.review_status ? '公司：' + item.review_status : '待公司复核' }}
+                </el-tag>
+              </template>
               <el-tag v-if="item.screenshots?.length" size="small" type="info" effect="plain">{{ item.screenshots.length }} 张截图</el-tag>
+              <span v-if="isCompany && !item.review_status" class="text-muted" style="font-size:12px;">待公司复核</span>
             </div>
           </div>
           <!-- 右侧：裁剪图 -->
@@ -163,22 +222,50 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Refresh, RefreshLeft, VideoPlay, Star, ChatDotRound, Share,
   Link, Document, FolderOpened, WarningFilled, QuestionFilled, View
 } from '@element-plus/icons-vue'
-import { evidenceApi, reviewApi, taskApi } from '@/api/index'
-import { formatDateTime, formatDateTimeShort } from '@/utils/time'
+import { evidenceApi, taskApi } from '@/api/index'
+import { formatDateTimeShort } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
+
+const props = defineProps({
+  embedWorkOrderId: { type: Number, default: 0 },
+  embedMode: { type: String, default: '' },
+  hideChrome: { type: Boolean, default: false },
+})
 
 const router = useRouter()
+const route = useRoute()
+const auth = useAuthStore()
+const isCompany = computed(() => props.embedMode === 'company' || route.path.startsWith('/company'))
+const workOrderId = computed(() => props.embedWorkOrderId || parseInt(route.query.work_order_id) || 0)
+
 const items = ref([])
 const loading = ref(false)
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const sortBy = ref('newest')
+const selectedIds = ref([])
+const batchPushing = ref(false)
+const batchPushingCompany = ref(false)
+const pushingAllCompany = ref(false)
+
+const policeEligibleCount = computed(() =>
+  selectedIds.value.filter(id => {
+    const item = items.value.find(i => i.id === id)
+    return item && canPushPolice(item)
+  }).length
+)
+
+function canPushPolice(item) {
+  return item.pushed_to_company && item.review_status === '侵权' && !item.pushed_to_police
+}
 
 const stats = ref({})
 
@@ -186,15 +273,23 @@ const filters = reactive({ reviewStatus: '', keyword: '', blogger: '', taskId: '
 const taskOptions = ref([])
 
 async function loadTasks() {
+  if (isCompany.value) return
   try {
     const { data } = await taskApi.list({ page: 1, page_size: 100, phase: 2 })
     taskOptions.value = data.items || []
-    // 默认选中最新任务
     if (taskOptions.value.length && !filters.taskId) {
       filters.taskId = taskOptions.value[0].id
     }
-  } catch (e) {
+  } catch {
     taskOptions.value = []
+  }
+}
+
+function toggleSelect(id, checked) {
+  if (checked) {
+    if (!selectedIds.value.includes(id)) selectedIds.value.push(id)
+  } else {
+    selectedIds.value = selectedIds.value.filter(x => x !== id)
   }
 }
 
@@ -227,30 +322,28 @@ function findShot(item, prefix) {
 function getProfileCrop(item) { return findShot(item, 'profile_card_name_region_') }
 function getTrafficCrop(item) { return findShot(item, 'traffic_page_name_region_') }
 
-async function quickReview(item, status) {
-  const { ElMessage } = await import('element-plus')
-  try {
-    await reviewApi.update(item.id, { review_status: status })
-    item.review_status = status
-    ElMessage.success(`已标注: ${status}`)
-    fetchData()
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '标注失败')
-  }
-}
-
 async function fetchData() {
   loading.value = true
   try {
-    const { data } = await evidenceApi.list({
-      page: page.value, page_size: pageSize.value,
-      review_status: filters.reviewStatus, keyword: filters.keyword, blogger: filters.blogger,
-      task_id: filters.taskId || 0,
-    })
+    const params = {
+      page: page.value,
+      page_size: pageSize.value,
+      review_status: filters.reviewStatus,
+      keyword: filters.keyword,
+      blogger: filters.blogger,
+    }
+    if (isCompany.value) {
+      params.company_pool_only = true
+      params.phase = 2
+    }
+    if (workOrderId.value) params.work_order_id = workOrderId.value
+    else if (filters.taskId) params.task_id = filters.taskId
+    const { data } = await evidenceApi.list(params)
     items.value = data.items || []
     total.value = data.total || 0
     stats.value = data.stats || {}
-  } catch (e) {
+    selectedIds.value = selectedIds.value.filter(id => items.value.some(i => i.id === id))
+  } catch {
     items.value = []
   } finally {
     loading.value = false
@@ -259,8 +352,111 @@ async function fetchData() {
 
 function onFilterChange() { page.value = 1; fetchData() }
 function resetFilter() { filters.reviewStatus = ''; filters.keyword = ''; filters.blogger = ''; sortBy.value = 'newest'; page.value = 1; fetchData() }
-function openDetail(id) { router.push(`/evidence/${id}`) }
-function previewFile(path) { if (path) window.open(`/files/${path}`, '_blank') }
+function openDetail(id) {
+  if (isCompany.value) router.push(`/company/evidence/${id}`)
+  else router.push(`/collector/evidence/${id}`)
+}
+
+async function pushOneCompany(item) {
+  try {
+    await evidenceApi.pushCompany([item.id], auth.assignee || '取证员')
+    item.pushed_to_company = true
+    ElMessage.success('已推送至公司核查池')
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '推送失败')
+  }
+}
+
+async function pushOnePolice(item) {
+  try {
+    await evidenceApi.push([item.id], auth.assignee || '取证员')
+    item.pushed_to_police = true
+    ElMessage.success('已推送给公安')
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '推送失败')
+  }
+}
+
+async function pushAllCompany() {
+  const scopeHint = workOrderId.value
+    ? `当前工单 #${workOrderId.value}`
+    : filters.taskId
+      ? `当前任务 #${filters.taskId}`
+      : '全部二阶段任务'
+  try {
+    await ElMessageBox.confirm(
+      `将${scopeHint}中尚未推送的证据一键推送至公司核查池，是否继续？`,
+      '一键推送公司复核',
+      { type: 'warning', confirmButtonText: '确认推送', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  pushingAllCompany.value = true
+  try {
+    const { data } = await evidenceApi.pushCompanyAll({
+      pushedBy: auth.assignee || '取证员',
+      taskId: filters.taskId || undefined,
+      workOrderId: workOrderId.value || undefined,
+    })
+    if (!data.updated) {
+      ElMessage.info(data.message || '没有待推送的二阶段证据')
+    } else {
+      ElMessage.success(data.message || `已一键推送 ${data.updated} 条`)
+    }
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '一键推送失败')
+  } finally {
+    pushingAllCompany.value = false
+  }
+}
+
+async function pushBatchCompany() {
+  const ids = selectedIds.value.filter(id => {
+    const item = items.value.find(i => i.id === id)
+    return item && !item.pushed_to_company
+  })
+  if (!ids.length) {
+    ElMessage.warning('所选条目均已推送公司或无有效项')
+    return
+  }
+  batchPushingCompany.value = true
+  try {
+    const { data } = await evidenceApi.pushCompany(ids, auth.assignee || '取证员')
+    ElMessage.success(`已推送公司 ${data.updated || ids.length} 条`)
+    selectedIds.value = []
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '批量推送失败')
+  } finally {
+    batchPushingCompany.value = false
+  }
+}
+
+async function pushBatchPolice() {
+  const ids = selectedIds.value.filter(id => {
+    const item = items.value.find(i => i.id === id)
+    return item && canPushPolice(item)
+  })
+  if (!ids.length) {
+    ElMessage.warning('仅「已送核查池且公司标侵权」的证据可推送公安')
+    return
+  }
+  batchPushing.value = true
+  try {
+    const { data } = await evidenceApi.push(ids, auth.assignee || '取证员')
+    ElMessage.success(`已推送公安 ${data.updated || ids.length} 条`)
+    selectedIds.value = []
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '批量推送失败')
+  } finally {
+    batchPushing.value = false
+  }
+}
 
 onMounted(async () => {
   await loadTasks()
@@ -352,6 +548,9 @@ onMounted(async () => {
 }
 
 .evidence-card { border-left: 6px solid transparent; cursor: pointer; position: relative; transition: all 0.2s; }
+.embed-mode { padding: 0; min-height: auto; }
+.embed-mode .card { margin-bottom: 10px; }
+.select-box { display: flex; align-items: center; padding: 0 8px 0 12px; }
 .evidence-card.border-danger { border-left-color: #ef4444; background: linear-gradient(90deg, rgba(239,68,68,0.08) 0%, rgba(239,68,68,0) 30%); }
 .evidence-card.border-success { border-left-color: #22c55e; background: linear-gradient(90deg, rgba(34,197,94,0.08) 0%, rgba(34,197,94,0) 30%); }
 .evidence-card.border-danger::before {

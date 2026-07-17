@@ -5,8 +5,8 @@
 | 组件 | 说明 |
 |------|------|
 | Python | 3.11（conda 环境 `zscq`） |
-| 数据库 | MySQL 8.0，端口 6714，库名 `zscq` |
-| scrcpy | `C:\scrcpy-win64-v3.3.3\`（自带 ADB） |
+| 数据库 | MySQL 8.0，端口 3306（可用 `.env` 覆盖），库名 `zscq` |
+| scrcpy | 本机常见路径如 `D:\software\scrcpy-win64-v3.3.3\`（自带 ADB；`config` 会自动探测） |
 | ffmpeg | 6.x full-build，需加入系统 PATH |
 | ascript_mcp | 从开发机复制到 conda 环境 site-packages |
 | 前端 | 构建后由 FastAPI 直接托管（无需 nginx） |
@@ -30,8 +30,8 @@ conda activate zscq
 下载 [MySQL Community Server 8.0](https://dev.mysql.com/downloads/mysql/8.0.html) 安装。
 
 安装时注意：
-- 端口设为 **6714**
-- root 密码设为 **root**
+- 端口设为 **3306**（或与 `.env` 中 `PLATFORM_DATABASE_URL` 一致）
+- root 密码设为 **root**（或同步改 `.env`）
 - 字符集选 **utf8mb4**
 
 安装完成后，用 MySQL 客户端（如 HeidiSQL、Navicat 或命令行）建库：
@@ -57,7 +57,7 @@ ffmpeg -version
 
 ### 4. 安装 scrcpy + ADB
 
-从开发机直接复制 `C:\scrcpy-win64-v3.3.3\` 整个目录到服务器相同路径。
+从开发机复制 scrcpy 目录到本机（示例路径 `D:\software\scrcpy-win64-v3.3.3\`，并在 `.env` 中设置 `PLATFORM_SCRCPY_DIR`）。
 
 该目录包含：
 - `scrcpy.exe` — 录屏工具
@@ -67,8 +67,8 @@ ffmpeg -version
 
 验证：
 ```powershell
-C:\scrcpy-win64-v3.3.3\adb.exe version
-C:\scrcpy-win64-v3.3.3\scrcpy.exe --version
+& "$env:PLATFORM_SCRCPY_DIR\adb.exe" version
+& "$env:PLATFORM_SCRCPY_DIR\scrcpy.exe" --version
 ```
 
 ### 5. 安装 Python 依赖
@@ -126,8 +126,8 @@ npm run build
 项目所有配置都支持环境变量覆盖，不需要时可以跳过。需要改的常见项：
 
 ```powershell
-# MySQL 连接串（如果不是 root/root@127.0.0.1:6714/zscq）
-$env:PLATFORM_DATABASE_URL = "mysql+aiomysql://root:root@127.0.0.1:6714/zscq"
+# MySQL 连接串（默认已是 3306；密码按本机实际修改）
+$env:PLATFORM_DATABASE_URL = "mysql+aiomysql://root:你的密码@127.0.0.1:3306/zscq"
 
 # 手机 IP（不设则自动扫描 ADB 设备）
 $env:PLATFORM_DEVICE_IP = "192.168.1.100"
@@ -164,7 +164,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 4. 验证：
 
 ```powershell
-C:\scrcpy-win64-v3.3.3\adb.exe devices
+& "D:\software\scrcpy-win64-v3.3.3\adb.exe" devices
 # 应看到设备列表
 ```
 
@@ -214,9 +214,10 @@ adb connect <手机IP>:5555
 ### Q5: 数据库连接失败
 
 - 确认 MySQL 服务已启动（`services.msc` 查看 MySQL80）
-- 确认端口是 6714
+- 确认端口是 3306
 - 确认 `zscq` 库已创建
-- 检查防火墙是否放行 6714 端口
+- 检查防火墙是否放行 3306 端口
+- 确认 `.env` 中账号密码与本机 MySQL 一致
 
 ### Q6: 如何后台运行
 
@@ -242,6 +243,6 @@ nssm start zscq-platform
 | 源路径 | 目标路径 | 说明 |
 |--------|----------|------|
 | 整个项目 `platform\` | 同结构任意目录 | 后端代码 + 前端源码 |
-| `C:\scrcpy-win64-v3.3.3\` | `C:\scrcpy-win64-v3.3.3\` | scrcpy + ADB |
+| scrcpy 目录（如 `D:\software\scrcpy-win64-v3.3.3\`） | 同路径或任意路径 + `.env` 配置 | scrcpy + ADB |
 | `site-packages\ascript_mcp\` | conda 环境的 `site-packages\` | AScript MCP 模块 |
 | `platform\frontend\dist\` | （构建后自动生成） | 前端静态文件 |

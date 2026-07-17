@@ -52,6 +52,68 @@ export const linkPoolApi = {
 export const evidenceApi = {
   list(params = {}) { return request.get('/evidence', { params }) },
   get(id) { return request.get(`/evidence/${id}`) },
+  push(ids, pushedBy = '取证员') {
+    return request.post('/evidence/push', { ids, pushed_by: pushedBy })
+  },
+  pushCompany(ids, pushedBy = '取证员') {
+    return request.post('/evidence/push-company', { ids, pushed_by: pushedBy })
+  },
+  pushCompanyAll({ pushedBy = '取证员', taskId, workOrderId } = {}) {
+    const body = { pushed_by: pushedBy }
+    if (taskId) body.task_id = taskId
+    if (workOrderId) body.work_order_id = workOrderId
+    return request.post('/evidence/push-company-all', body)
+  },
+}
+
+/** 工单 */
+export const workOrderApi = {
+  list(params = {}) { return request.get('/work-orders', { params }) },
+  get(id) { return request.get(`/work-orders/${id}`) },
+  create(data) { return request.post('/work-orders', data) },
+  update(id, data) { return request.patch(`/work-orders/${id}`, data) },
+  submit(id) { return request.post(`/work-orders/${id}/submit`) },
+  assign(id, assignedTo) { return request.post(`/work-orders/${id}/assign`, { assigned_to: assignedTo }) },
+  importLinks(id, links = []) { return request.post(`/work-orders/${id}/import-links`, { links }) },
+  linkPool(id) { return request.get(`/work-orders/${id}/link-pool`) },
+  uploadAttachment(id, file, fileType = 'other') {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('file_type', fileType)
+    return request.post(`/work-orders/${id}/attachments`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  importPackage(file, submitter = '公司用户') {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('submitter', submitter)
+    return request.post('/work-orders/import-package', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  helpCollect(excel, submitter = '公司用户') {
+    const fd = new FormData()
+    fd.append('excel', excel)
+    fd.append('submitter', submitter)
+    return request.post('/work-orders/help-collect', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  async downloadPackageTemplate() {
+    const res = await request.get('/work-orders/package-template', { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'work-order-package-sample.zip'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+}
+
+/** 驾驶舱 */
+export const dashboardApi = {
+  police(params = {}) { return request.get('/dashboard/police', { params }) },
 }
 
 /** 审核管理 */

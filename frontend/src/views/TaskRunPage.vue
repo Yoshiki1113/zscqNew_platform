@@ -11,7 +11,7 @@
         <el-button v-if="actionButtons.showStart" type="primary" size="small" @click="startTask" :loading="starting">开始执行</el-button>
         <template v-if="actionButtons.showPhase2">
           <el-button type="primary" size="small" @click="startPhase2" :loading="startingPhase2">直接采集这批链接</el-button>
-          <el-button size="small" @click="$router.push('/link-pool')">去链接池合并更多</el-button>
+          <el-button size="small" @click="$router.push('/collector/link-pool')">去链接池合并更多</el-button>
         </template>
         <el-button v-if="actionButtons.showRetry" size="small" @click="retryTask" :loading="retrying">重试</el-button>
         <el-button v-if="actionButtons.showEvidence" size="small" @click="$router.push('/evidence')">查看证据</el-button>
@@ -43,7 +43,7 @@
       </div>
       <div class="banner-actions">
         <el-button v-if="taskBanner.type === 'completed'" type="primary" @click="$router.push('/evidence')">查看证据列表</el-button>
-        <el-button v-if="taskBanner.type === 'completed'" @click="$router.push('/review-pool')">去审核</el-button>
+        <el-button v-if="taskBanner.type === 'completed'" @click="$router.push('/collector/review-pool')">去审核</el-button>
         <el-button v-if="['failed','stopped'].includes(taskBanner.type)" type="primary" @click="retryTask">重新执行</el-button>
       </div>
     </div>
@@ -431,7 +431,7 @@ onMounted(async () => {
       const { data } = await taskApi.list({ page_size: 1 })
       const recent = data?.items?.[0] || data?.[0]
       if (recent && recent.id) {
-        router.replace(`/tasks/${recent.id}`)
+        router.replace(`/collector/tasks/${recent.id}`)
         return
       }
     } catch {}

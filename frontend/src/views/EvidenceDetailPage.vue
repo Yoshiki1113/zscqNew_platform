@@ -61,8 +61,8 @@
         </div>
       </div>
 
-      <!-- 审核操作栏 -->
-      <div class="card">
+      <!-- 审核操作栏：公司端复核 -->
+      <div v-if="companyReview" class="card">
         <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
           <el-button type="danger" @click="doReview('侵权')" :loading="reviewing">
             <el-icon style="margin-right:2px"><CircleCloseFilled /></el-icon>侵权
@@ -73,10 +73,45 @@
           <el-button v-if="record.review_status" @click="doReview('')" :loading="reviewing" plain>
             <el-icon style="margin-right:2px"><RefreshLeft /></el-icon>撤销
           </el-button>
-          <el-input v-model="reviewNotes" placeholder="备注" style="width:200px;" />
+          <el-input v-model="reviewNotes" placeholder="复核备注" style="width:200px;" />
           <el-button type="primary" @click="doReview(record.review_status)" :loading="reviewing">
             <el-icon style="margin-right:2px"><Check /></el-icon>保存
           </el-button>
+        </div>
+      </div>
+      <!-- 取证端：推送公司 / 公安 -->
+      <div v-else-if="!readonly" class="card">
+        <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <el-button
+            v-if="!record.pushed_to_company"
+            type="primary"
+            :loading="pushingCompany"
+            @click="pushToCompany"
+          >
+            推送公司核查池
+          </el-button>
+          <el-tag v-else type="primary" effect="plain">
+            已送核查池 {{ formatDateTime(record.pushed_to_company_at) }}
+          </el-tag>
+          <el-button
+            v-if="canPushPolice"
+            type="warning"
+            :loading="pushing"
+            @click="pushToPolice"
+          >
+            推送公安
+          </el-button>
+          <el-tag v-else-if="record.pushed_to_police" type="success" effect="plain">
+            已推送公安 {{ formatDateTime(record.pushed_at) }}
+          </el-tag>
+          <el-tag v-else-if="record.pushed_to_company" type="info" effect="plain">
+            公司复核：{{ record.review_status || '待复核' }}
+          </el-tag>
+        </div>
+      </div>
+      <div v-else-if="record.pushed_to_police" class="card">
+        <div class="card-body">
+          <el-tag type="success">已推送公安 · {{ formatDateTime(record.pushed_at) }}</el-tag>
         </div>
       </div>
 
@@ -380,14 +415,26 @@ import {
 } from '@element-plus/icons-vue'
 import { evidenceApi, reviewApi } from '@/api/index'
 import { formatDateTime } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
 import axios from 'axios'
 
 const route = useRoute()
+const auth = useAuthStore()
+const readonly = computed(() => !!route.meta.readonly)
+const companyReview = computed(() => !!route.meta.companyReview)
 const record = ref({})
 const loading = ref(false)
 const reviewing = ref(false)
+const pushing = ref(false)
+const pushingCompany = ref(false)
 const reviewNotes = ref('')
 const jsonContent = ref('')
+
+const canPushPolice = computed(() =>
+  record.value.pushed_to_company &&
+  record.value.review_status === '侵权' &&
+  !record.value.pushed_to_police
+)
 
 const reviewType = computed(() => record.value.review_status === '侵权' ? 'danger' : record.value.review_status === '未侵权' ? 'success' : 'info')
 
@@ -488,6 +535,34 @@ async function doReview(status) {
     ElMessage.success(`已标注: ${status}`)
   } catch (e) { ElMessage.error(e.response?.data?.detail || '标注失败') }
   finally { reviewing.value = false }
+}
+
+async function pushToCompany() {
+  pushingCompany.value = true
+  try {
+    await evidenceApi.pushCompany([parseInt(route.params.id)], auth.assignee || '取证员')
+    record.value.pushed_to_company = true
+    record.value.pushed_to_company_at = new Date().toISOString()
+    ElMessage.success('已推送至公司核查池')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '推送失败')
+  } finally {
+    pushingCompany.value = false
+  }
+}
+
+async function pushToPolice() {
+  pushing.value = true
+  try {
+    await evidenceApi.push([parseInt(route.params.id)], auth.assignee || '取证员')
+    record.value.pushed_to_police = true
+    record.value.pushed_at = new Date().toISOString()
+    ElMessage.success('已推送给公安')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '推送失败')
+  } finally {
+    pushing.value = false
+  }
 }
 
 onMounted(fetchDetail)

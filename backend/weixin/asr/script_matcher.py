@@ -67,16 +67,28 @@ def _resolve_script_path(keyword: str = "", script_path: str | Path | None = Non
 
     优先级：
     1. 显式传入的 script_path
-    2. SCRIPTS_DIR 环境变量 → scripts/{keyword}.txt
-    3. SCRIPT_RAW_PATH 环境变量（单文件模式）
+    2. SCRIPTS_DIR/{keyword}/_script_raw.txt（工单上传标准目录）
+    3. SCRIPTS_DIR/{keyword}.txt（单文件）
+    4. SCRIPT_RAW_PATH 环境变量（单文件模式）
     找不到则返回 None，不随便用默认剧本
     """
     if script_path:
-        return Path(script_path)
+        p = Path(script_path)
+        return p if p.exists() else None
     if _SCRIPTS_DIR and keyword:
-        p = Path(_SCRIPTS_DIR) / f"{keyword}.txt"
-        if p.exists():
-            return p
+        base = Path(_SCRIPTS_DIR)
+        dir_raw = base / keyword / "_script_raw.txt"
+        if dir_raw.exists():
+            return dir_raw
+        flat = base / f"{keyword}.txt"
+        if flat.exists():
+            return flat
+        # 目录内任意 .txt 兜底（批量 zip 解压后的别名）
+        kw_dir = base / keyword
+        if kw_dir.is_dir():
+            txts = sorted(kw_dir.glob("*.txt"))
+            if txts:
+                return txts[0]
     env_path = os.environ.get("SCRIPT_RAW_PATH", "")
     if env_path:
         p = Path(env_path)

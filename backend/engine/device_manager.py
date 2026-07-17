@@ -355,10 +355,30 @@ class DeviceManager:
         等屏幕捕获操作（通过 deploy_and_run 在手机端运行）。
         因此在连接成功后额外执行一次最小截图请求，让权限弹窗在前置检查阶段
         就弹出，避免任务启动后才弹窗打断采集。
+
+        连接策略：先 LocalIP，失败则用 ADB 模式（USB serial / WiFi adb）。
         """
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
+
+            # 解析可用的 ADB 连接目标（serial）
+            adb_targets: list[str] = []
+            try:
+                mgr = get_device_manager()
+                stdout, _, _ = await mgr._run_adb("devices", timeout=5)
+                for line in stdout.splitlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == "device":
+                        adb_targets.append(parts[0])
+            except Exception:
+                pass
+
+            connect_attempts = [
+                {"ip": ip, "port": port, "connection_mode": "LocalIP"},
+            ]
+            for target in adb_targets:
+                connect_attempts.append({"ip": target, "connection_mode": "ADB"})
 
             sp = StdioServerParameters(
                 command="python", args=["-m", "ascript_mcp.local"],
@@ -369,24 +389,22 @@ class DeviceManager:
                 async with stdio_client(sp) as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
-                        # 1. 连接设备（仅建立 socket 连接，不触发权限弹窗）
-                        result = await session.call_tool(
-                            "connect_device",
-                            {"ip": ip, "port": port, "connection_mode": "LocalIP"},
-                        )
-                        texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
-                        merged = "\n".join(texts).lower()
-                        failure_tokens = ("fail", "error", "失败", "错误", "未连接")
-                        success_tokens = ("connected", "已连接", "success", "成功", "本地端口")
-                        if any(token in merged for token in failure_tokens):
-                            return False
-                        if not any(token in merged for token in success_tokens):
+                        connected = False
+                        for args in connect_attempts:
+                            result = await session.call_tool("connect_device", args)
+                            texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
+                            merged = "\n".join(texts).lower()
+                            failure_tokens = ("fail", "error", "失败", "错误", "未连接")
+                            success_tokens = ("connected", "已连接", "success", "成功", "本地端口")
+                            if any(token in merged for token in failure_tokens):
+                                continue
+                            if any(token in merged for token in success_tokens):
+                                connected = True
+                                break
+                        if not connected:
                             return False
 
                         # 2. 执行一次截图，触发 MediaProjection 权限弹窗
-                        #    screen.capture_cv() 首次调用会弹出系统授权对话框；
-                        #    已授权则立即返回截图，未授权则阻塞等待用户操作。
-                        #    log_seconds 到期后返回，弹窗留在屏幕上等用户点击。
                         trigger_code = (
                             "import base64, cv2\n"
                             "from ascript.android import screen\n"
@@ -398,9 +416,8 @@ class DeviceManager:
                         try:
                             shot_result = await session.call_tool(
                                 "deploy_and_run",
-                                {"project_name": "zscqAndroid", "code": trigger_code, "log_seconds": 5},
+                                {"project_name": "zscqAndroid", "code": trigger_code, "log_seconds": 8},
                             )
-                            # 截图成功 = 权限已授予；无截图数据 = 弹窗已弹出但用户尚未授权
                             shot_text = "".join(
                                 c.text for c in shot_result.content if getattr(c, "type", "") == "text"
                             )

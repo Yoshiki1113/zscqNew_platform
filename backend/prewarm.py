@@ -32,22 +32,28 @@ def _prewarm_paddleocr() -> dict:
         print("  [prewarm] PaddleOCR 初始化中（首次可能下载模型）...")
         ocr = PaddleOCR(use_angle_cls=True, lang="ch")
         _ = ocr.ocr  # 确认模型已加载
-        print(f"  [prewarm] PaddleOCR ✓  缓存: {cache_dir}")
+        print(f"  [prewarm] PaddleOCR [OK]  缓存: {cache_dir}")
         result["ok"] = True
     except Exception as e:
         result["error"] = str(e)
-        print(f"  [prewarm] PaddleOCR ✗  失败: {e}")
+        print(f"  [prewarm] PaddleOCR [FAIL]  失败: {e}")
         traceback.print_exc()
     return result
 
 
 def _prewarm_ocr_worker() -> dict:
-    """启动 OCR worker 子进程并发送预热图片，确保 worker 内 PaddleOCR 已就绪
+    """启动 OCR worker 子进程并发送预热图片，确保 worker 内 PaddleOCR 已就绪。
 
-    使用 collector 模块的 read_ocr_worker_line 安全读取响应，
-    超时后自动重启 worker 避免 stdout 读取线程冲突。
+    失败不抛到启动流程：豆包视觉可用时 OCR worker 仅为兜底。
     """
     result = {"ok": False, "error": "", "worker_pid": 0}
+    # 默认跳过：主进程已预热 PaddleOCR，worker 首次真正 OCR 时再懒加载即可
+    if os.environ.get("PLATFORM_PREWARM_OCR_WORKER", "0") in ("0", "false", "no"):
+        print("  [prewarm] OCR worker [SKIP]  跳过（PLATFORM_PREWARM_OCR_WORKER=0，首次 OCR 时再加载）")
+        result["ok"] = True
+        result["skipped"] = True
+        return result
+
     tmp_path = ""
     try:
         from weixin.core.collector import (
@@ -65,7 +71,6 @@ def _prewarm_ocr_worker() -> dict:
 
             width, height = 100, 100
             ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-            # 每行：1 字节 filter + width*3 字节 RGB
             raw_rows = b""
             for _ in range(height):
                 raw_rows += b"\x00" + b"\x00\x00\x00" * width
@@ -85,9 +90,10 @@ def _prewarm_ocr_worker() -> dict:
         proc.stdin.write(payload + "\n")
         proc.stdin.flush()
 
-        # 使用 collector 的 read_ocr_worker_line（内部用 queue+thread，超时安全）
         from config import OCR_WORKER_TIMEOUT_SECONDS
-        line = read_ocr_worker_line(proc, timeout_seconds=OCR_WORKER_TIMEOUT_SECONDS)
+        # 首次冷启动给更长时间
+        timeout = max(float(OCR_WORKER_TIMEOUT_SECONDS), 300.0)
+        line = read_ocr_worker_line(proc, timeout_seconds=timeout)
         if not line:
             stop_local_ocr_worker()
             raise RuntimeError("Worker 无响应（返回空行）")
@@ -97,12 +103,11 @@ def _prewarm_ocr_worker() -> dict:
             stop_local_ocr_worker()
             raise RuntimeError(response.get("error", "Worker 返回失败"))
 
-        print(f"  [prewarm] OCR worker ✓  pid={proc.pid}  jobs={response.get('jobs')}")
+        print(f"  [prewarm] OCR worker [OK]  pid={proc.pid}  jobs={response.get('jobs')}")
         result["ok"] = True
     except Exception as e:
         result["error"] = str(e)
-        print(f"  [prewarm] OCR worker ✗  失败: {e}")
-        traceback.print_exc()
+        print(f"  [prewarm] OCR worker [FAIL]  失败: {e}（不影响 API 启动，采集时会重试）")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -110,7 +115,6 @@ def _prewarm_ocr_worker() -> dict:
             except OSError:
                 pass
     return result
-
 
 def _check_xunfei() -> dict:
     """检查讯飞云 ASR 是否可用（环境变量或代码中的默认值）"""
@@ -135,11 +139,11 @@ def _check_doubao_vision() -> dict:
             "error": f"模块加载失败: {e}",
         }
     if not status["enabled"]:
-        print("  [prewarm] 豆包视觉 ⊘  已禁用（ARK_VISION_ENABLED=0）")
+        print("  [prewarm] 豆包视觉 [SKIP]  已禁用（ARK_VISION_ENABLED=0）")
     elif status["ok"]:
-        print(f"  [prewarm] 豆包视觉 ✓  模型={status['model']}  连通正常")
+        print(f"  [prewarm] 豆包视觉 [OK]  模型={status['model']}  连通正常")
     else:
-        print(f"  [prewarm] 豆包视觉 ✗  {status['error'][:120]}")
+        print(f"  [prewarm] 豆包视觉 [FAIL]  {status['error'][:120]}")
         print("  [prewarm]           字段提取将回退到 PaddleOCR")
     return status
 
@@ -177,12 +181,12 @@ async def run_prewarm():
             await loop.run_in_executor(pool, _prewarm_ocr_worker)
             worker_status = {"ok": True}
         else:
-            print("  [prewarm] OCR worker ⊘  跳过（PaddleOCR 未就绪）")
+            print("  [prewarm] OCR worker [SKIP]  跳过（PaddleOCR 未就绪）")
             worker_status = {"ok": False, "error": "PaddleOCR 未就绪"}
 
     # ── 汇总 ──
-    print(f"  [prewarm] 讯飞云ASR: {'✓ 已配置' if xunfei_status['configured'] else '✗ 未配置'}")
-    print(f"  [prewarm] 剧本台词: {'✓' if script_status['found'] else '✗ 未找到'} "
+    print(f"  [prewarm] 讯飞云ASR: {'[OK] 已配置' if xunfei_status['configured'] else '[FAIL] 未配置'}")
+    print(f"  [prewarm] 剧本台词: {'[OK]' if script_status['found'] else '[FAIL] 未找到'} "
           f"{script_status['scripts_dir']}")
     if script_status["keywords"]:
         print(f"  [prewarm]           已配置剧名: {', '.join(script_status['keywords'])}")

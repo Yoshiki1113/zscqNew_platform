@@ -125,7 +125,7 @@ async function loadTasks() {
 }
 
 function goTask(row) {
-  router.push(`/tasks/${row.id}`)
+  router.push(`/collector/tasks/${row.id}`)
 }
 
 async function deleteTask(row) {

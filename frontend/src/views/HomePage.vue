@@ -82,9 +82,9 @@
         <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;">
           <span style="font-size:13px;color:var(--muted);">
             📋 侵权线索中有 <b>{{ cluesWithLinks }}</b> 条链接可用 —
-            前往 <router-link to="/link-pool" style="font-weight:600;">链接池</router-link> 选择链接并创建取证任务
+            前往 <router-link to="/collector/link-pool" style="font-weight:600;">链接池</router-link> 选择链接并创建取证任务
           </span>
-          <el-button size="small" @click="$router.push('/link-pool')">前往链接池</el-button>
+          <el-button size="small" @click="$router.push('/collector/link-pool')">前往链接池</el-button>
         </div>
       </div>
     </div>
@@ -94,7 +94,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { EditPen, Promotion } from '@element-plus/icons-vue'
 import { taskApi, deviceApi, clueApi } from '@/api/index'
@@ -102,6 +102,7 @@ import { useAppStore } from '@/stores/app'
 import DeviceStatus from '@/components/DeviceStatus.vue'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const form = reactive({
@@ -109,6 +110,7 @@ const form = reactive({
   maxVideos: 5,
   deviceId: '',
   skipSearch: false,
+  workOrderId: null,
 })
 
 const devices = ref([])
@@ -140,7 +142,7 @@ async function startTask() {
   }
   creating.value = true
   try {
-    const { data } = await taskApi.create({
+    const payload = {
       keyword: form.keyword,
       max_videos: form.maxVideos,
       hold_seconds: 240,
@@ -149,7 +151,9 @@ async function startTask() {
       enable_asr: true,
       skip_search: form.skipSearch,
       collect_mode: 'link_first',
-    })
+    }
+    if (form.workOrderId) payload.work_order_id = form.workOrderId
+    const { data } = await taskApi.create(payload)
     ElMessage.success(`任务 #${data.id} 已创建`)
     appStore.setLastTaskId(data.id)
     try {
@@ -157,7 +161,7 @@ async function startTask() {
     } catch (e) {
       ElMessage.error('任务启动失败: ' + (e.response?.data?.detail || e.message))
     }
-    router.push(`/tasks/${data.id}`)
+    router.push(`/collector/tasks/${data.id}`)
   } catch (e) {
     ElMessage.error('创建失败: ' + (e.response?.data?.detail || e.message))
   } finally {
@@ -174,6 +178,8 @@ async function loadCluesLinkCount() {
 
 
 onMounted(() => {
+  if (route.query.keyword) form.keyword = route.query.keyword
+  if (route.query.work_order_id) form.workOrderId = parseInt(route.query.work_order_id) || null
   loadDevices()
   loadCluesLinkCount()
 })

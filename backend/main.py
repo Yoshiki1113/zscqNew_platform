@@ -54,16 +54,27 @@ async def lifespan(app: FastAPI):
     get_scheduler()
     get_device_manager()
 
-    print("  [init] 预热第三方模型...")
+    # 模型预热放到后台，避免 OCR worker 超时拖住 API（创建任务等接口可先用）
+    print("  [init] 后台预热第三方模型（不阻塞 API）...")
     from prewarm import run_prewarm
-    try:
-        await run_prewarm()
-    except Exception as e:
-        print(f"  [init] 预热失败（服务仍可启动）: {e}")
+
+    async def _prewarm_bg():
+        try:
+            await run_prewarm()
+            print("  [init] 模型预热完成")
+        except Exception as e:
+            print(f"  [init] 预热失败（服务仍可用）: {e}")
+
+    prewarm_task = asyncio.create_task(_prewarm_bg())
 
     print("─" * 48)
-    print("  [init] ✅ 全部就绪，服务启动中...")
+    print("  [init] OK 全部就绪，服务启动中...")
     yield
+    prewarm_task.cancel()
+    try:
+        await prewarm_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -120,6 +131,8 @@ from api.devices import router as devices_router
 from api.clues import router as clues_router
 from api.link_pool import router as link_pool_router
 from api.websocket import router as ws_router
+from api.work_orders import router as work_orders_router
+from api.dashboard import router as dashboard_router
 
 app.include_router(tasks_router, prefix="/api")
 app.include_router(evidence_router, prefix="/api")
@@ -128,6 +141,8 @@ app.include_router(authors_router, prefix="/api")
 app.include_router(devices_router, prefix="/api")
 app.include_router(clues_router, prefix="/api")
 app.include_router(link_pool_router, prefix="/api")
+app.include_router(work_orders_router, prefix="/api")
+app.include_router(dashboard_router, prefix="/api")
 app.include_router(ws_router, prefix="/ws")
 
 

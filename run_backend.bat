@@ -1,34 +1,48 @@
 @echo off
-chcp 65001 >nul
-cd /d "%~dp0\backend"
-
-echo ================================================
-echo   嘉剧荟 - 短剧侵权识别平台 - 后端服务
-echo ================================================
-echo.
-
-echo [1/4] 激活 conda 环境 zscq...
-call conda activate zscq
-if %errorlevel% neq 0 (
-    echo [错误] 无法激活 conda 环境 zscq，请确认环境已创建！
-    pause
-    exit /b 1
+setlocal EnableExtensions
+cd /d "%~dp0backend" || (
+  echo [ERROR] cannot cd to backend
+  pause
+  exit /b 1
 )
-echo   当前 Python:
-python --version
+
+echo ================================================
+echo   zscq platform - backend
+echo ================================================
 echo.
 
-echo [2/4] 安装 Python 依赖...
-pip install -r requirements.txt -q
+call :resolve_python
+if errorlevel 1 (
+  echo [ERROR] zscq python not found. Run: conda activate zscq
+  pause
+  exit /b 1
+)
 
+echo [1/3] Python: %PY%
+"%PY%" --version
 echo.
-echo [3/4] 启动 FastAPI 服务...
-echo   地址: http://localhost:8000
-echo   API文档: http://localhost:8000/docs
-echo.
-echo [4/4] 等待模型预热、环境就绪...
-echo.
-REM --reload-dir . 只监控 backend 源码，不监控 evidence_data/ 文件产出
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir .
 
+echo [2/3] Installing requirements...
+"%PY%" -m pip install -r requirements.txt -q
+echo.
+
+echo [3/3] Starting FastAPI on http://localhost:8000
+echo   Docs: http://localhost:8000/docs
+echo.
+"%PY%" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir .
 pause
+exit /b 0
+
+:resolve_python
+set "PY="
+if exist "%USERPROFILE%\anaconda3\envs\zscq\python.exe" set "PY=%USERPROFILE%\anaconda3\envs\zscq\python.exe"
+if exist "%USERPROFILE%\miniconda3\envs\zscq\python.exe" set "PY=%USERPROFILE%\miniconda3\envs\zscq\python.exe"
+if exist "C:\Users\sp\anaconda3\envs\zscq\python.exe" set "PY=C:\Users\sp\anaconda3\envs\zscq\python.exe"
+if defined PY exit /b 0
+where python >nul 2>&1
+if errorlevel 1 exit /b 1
+for /f "delims=" %%i in ('where python') do (
+  set "PY=%%i"
+  exit /b 0
+)
+exit /b 1

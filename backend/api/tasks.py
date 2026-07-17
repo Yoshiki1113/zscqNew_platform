@@ -40,6 +40,7 @@ class TaskCreate(BaseModel):
     device_id: str = Field("", max_length=100)
     enable_asr: bool = Field(True)
     skip_search: bool = Field(False)
+    work_order_id: Optional[int] = Field(None, ge=1)
 
 
 class TaskResponse(BaseModel):
@@ -54,6 +55,7 @@ class TaskResponse(BaseModel):
     skip_search: bool = False
     collect_mode: str = "link_first"
     phase: int = 1
+    work_order_id: Optional[int] = None
     evidence_count: int = 0
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -83,6 +85,7 @@ def _task_to_response(task: Task, evidence_count: int = 0) -> TaskResponse:
         skip_search=task.skip_search if task.skip_search is not None else False,
         collect_mode=task.collect_mode or "link_first",
         phase=task.phase if task.phase else 1,
+        work_order_id=task.work_order_id,
         evidence_count=evidence_count,
         started_at=task.started_at,
         finished_at=task.finished_at,
@@ -160,6 +163,7 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         enable_asr=body.enable_asr,
         skip_search=body.skip_search,
         collect_mode="link_first",
+        work_order_id=body.work_order_id,
         status="pending",
         created_at=datetime.now(),
     )

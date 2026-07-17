@@ -112,7 +112,7 @@
             <el-icon><Microphone /></el-icon>
             {{ current.asr_text?.slice(0,200) }}{{ current.asr_text?.length > 200 ? '...' : '' }}
           </div>
-          <a @click="$router.push(`/evidence/${current.id}`)" class="detail-link">
+          <a @click="$router.push(`/collector/evidence/${current.id}`)" class="detail-link">
             打开完整证据详情
             <el-icon><ArrowRight /></el-icon>
           </a>
