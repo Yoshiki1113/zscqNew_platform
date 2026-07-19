@@ -109,8 +109,17 @@ async def _ensure_task_columns(conn) -> None:
                 "ALTER TABLE work_orders ADD COLUMN company_pushed_count INT DEFAULT 0"
             ))
             print("  [migrate] work_orders.company_pushed_count added")
+        for name, ddl in [
+            ("script_status", "VARCHAR(20) DEFAULT 'none'"),
+            ("script_source_hash", "VARCHAR(64) DEFAULT ''"),
+            ("script_cleaned_at", "DATETIME NULL"),
+            ("script_error", "VARCHAR(500) DEFAULT ''"),
+        ]:
+            if name not in wo_cols:
+                await conn.execute(text(f"ALTER TABLE work_orders ADD COLUMN {name} {ddl}"))
+                print(f"  [migrate] work_orders.{name} added")
     except Exception as e:
-        print(f"  [migrate] work_orders.company_pushed_count: {e}")
+        print(f"  [migrate] work_orders columns: {e}")
 
 
 async def init_db():

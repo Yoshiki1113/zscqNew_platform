@@ -259,6 +259,14 @@ class WorkOrder(Base):
     evidence_count = Column(Integer, default=0)
     company_pushed_count = Column(Integer, default=0, comment="已推送公司核查池条数")
     pushed_count = Column(Integer, default=0, comment="已推送公安条数")
+    script_status = Column(
+        String(20),
+        default="none",
+        comment="none|pending|cleaning|ready|failed",
+    )
+    script_source_hash = Column(String(64), default="", comment="源剧本 sha256")
+    script_cleaned_at = Column(DateTime, nullable=True)
+    script_error = Column(String(500), default="", comment="清洗失败原因")
     submitted_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

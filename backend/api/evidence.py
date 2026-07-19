@@ -1,13 +1,14 @@
 """API 路由 — 证据查询"""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -220,6 +221,139 @@ async def list_evidence(
             "low": stats_row.low or 0,
         } if stats_row else {},
     )
+
+
+class RematchScriptsRequest(BaseModel):
+    work_order_id: Optional[int] = Field(None, ge=1)
+    task_id: Optional[int] = Field(None, ge=1)
+    keyword: str = Field("", max_length=200)
+
+
+def _apply_evidence_scope_filters(q, body: RematchScriptsRequest):
+    if body.task_id:
+        q = q.where(EvidenceRecord.task_id == body.task_id)
+    if body.work_order_id:
+        task_ids_subq = select(Task.id).where(Task.work_order_id == body.work_order_id)
+        q = q.where(EvidenceRecord.task_id.in_(task_ids_subq))
+    if body.keyword and body.keyword.strip():
+        q = q.where(EvidenceRecord.search_keyword.like(f"%{body.keyword.strip()}%"))
+    return q
+
+
+def _has_media_or_asr_clause():
+    """已有 ASR，或有录屏/音频路径可转写。"""
+    return or_(
+        and_(EvidenceRecord.asr_text.is_not(None), EvidenceRecord.asr_text != ""),
+        and_(
+            EvidenceRecord.recording_audio_path.is_not(None),
+            EvidenceRecord.recording_audio_path != "",
+        ),
+        and_(
+            EvidenceRecord.recording_video_path.is_not(None),
+            EvidenceRecord.recording_video_path != "",
+        ),
+    )
+
+
+@router.post("/evidence/rematch-scripts")
+async def rematch_scripts(
+    body: RematchScriptsRequest = RematchScriptsRequest(),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键补台词比对：无 ASR 先转写再比对；有 ASR 则直接按剧名比对。"""
+    from engine.script_rematch import REMATCH_STATUSES, rematch_evidence_rows
+
+    q = select(EvidenceRecord).where(
+        or_(
+            EvidenceRecord.script_match_status.in_(list(REMATCH_STATUSES)),
+            EvidenceRecord.script_match_status.is_(None),
+        ),
+        _has_media_or_asr_clause(),
+    )
+    q = _apply_evidence_scope_filters(q, body)
+
+    rows = list((await db.execute(q.order_by(EvidenceRecord.id.asc()))).scalars().all())
+    if not rows:
+        return {
+            "total_candidates": 0,
+            "matched": 0,
+            "not_found": 0,
+            "still_unavailable": 0,
+            "skipped_no_asr": 0,
+            "skipped_no_keyword": 0,
+            "transcribed": 0,
+            "error": 0,
+            "message": "没有需要补比对的证据",
+        }
+
+    summary = await asyncio.to_thread(rematch_evidence_rows, rows)
+    await db.commit()
+
+    parts = [
+        f"候选 {summary['total_candidates']} 条",
+        f"匹配 {summary['matched']}",
+        f"未命中 {summary['not_found']}",
+        f"仍缺台词 {summary['still_unavailable']}",
+    ]
+    if summary.get("transcribed"):
+        parts.append(f"补转写 {summary['transcribed']}")
+    if summary.get("skipped_no_asr"):
+        parts.append(f"转写失败 {summary['skipped_no_asr']}")
+    if summary.get("skipped_no_keyword"):
+        parts.append(f"缺关键词 {summary['skipped_no_keyword']}")
+    if summary.get("error"):
+        parts.append(f"异常 {summary['error']}")
+    summary["message"] = "补比对完成：" + "，".join(parts)
+    return summary
+
+
+@router.post("/evidence/batch-asr")
+async def batch_asr(
+    body: RematchScriptsRequest = RematchScriptsRequest(),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键 ASR 转写：对无转写文本且有媒体的证据只跑讯飞转写，不做台词比对。"""
+    from engine.script_rematch import batch_asr_evidence_rows
+
+    q = select(EvidenceRecord).where(
+        or_(EvidenceRecord.asr_text.is_(None), EvidenceRecord.asr_text == ""),
+        or_(
+            and_(
+                EvidenceRecord.recording_audio_path.is_not(None),
+                EvidenceRecord.recording_audio_path != "",
+            ),
+            and_(
+                EvidenceRecord.recording_video_path.is_not(None),
+                EvidenceRecord.recording_video_path != "",
+            ),
+        ),
+    )
+    q = _apply_evidence_scope_filters(q, body)
+
+    rows = list((await db.execute(q.order_by(EvidenceRecord.id.asc()))).scalars().all())
+    if not rows:
+        return {
+            "total": 0,
+            "transcribed": 0,
+            "skipped_no_media": 0,
+            "skipped_has_asr": 0,
+            "error": 0,
+            "message": "没有需要转写的证据",
+        }
+
+    summary = await asyncio.to_thread(batch_asr_evidence_rows, rows)
+    await db.commit()
+
+    parts = [
+        f"候选 {summary['total']} 条",
+        f"成功 {summary['transcribed']}",
+    ]
+    if summary.get("skipped_no_media"):
+        parts.append(f"无可用媒体 {summary['skipped_no_media']}")
+    if summary.get("error"):
+        parts.append(f"异常 {summary['error']}")
+    summary["message"] = "ASR 转写完成：" + "，".join(parts)
+    return summary
 
 
 @router.get("/evidence/{evidence_id}")

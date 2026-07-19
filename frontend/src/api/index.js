@@ -52,6 +52,13 @@ export const linkPoolApi = {
 export const evidenceApi = {
   list(params = {}) { return request.get('/evidence', { params }) },
   get(id) { return request.get(`/evidence/${id}`) },
+  rematchScripts(data = {}) {
+    // 可能含补转写，批量讯飞耗时长
+    return request.post('/evidence/rematch-scripts', data, { timeout: 1800000 })
+  },
+  batchAsr(data = {}) {
+    return request.post('/evidence/batch-asr', data, { timeout: 1800000 })
+  },
   push(ids, pushedBy = '取证员') {
     return request.post('/evidence/push', { ids, pushed_by: pushedBy })
   },

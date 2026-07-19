@@ -56,6 +56,7 @@ class WeixinCollector:
         enable_asr: bool = True,
         skip_search: bool = False,
         task_id: Optional[int] = None,
+        work_order_id: Optional[int] = None,
         log_callback: Optional[Callable] = None,
         sync_log_callback: Optional[Callable] = None,
     ):
@@ -70,6 +71,7 @@ class WeixinCollector:
         self.enable_asr = enable_asr
         self.skip_search = skip_search
         self.task_id = task_id
+        self.work_order_id = work_order_id
         self.write_db = write_db
         self.log_callback = log_callback  # async callback(log_entry: CollectionLog)
         self._sync_log_callback = sync_log_callback  # sync callback(level: str, message: str) — 线程安全
@@ -245,7 +247,11 @@ class WeixinCollector:
 
         from weixin.core.collector import _is_bottom_reached, capture_single_via_adb_execout
         from weixin.core.main import swipe_up
-        from weixin.core.collector import set_phone_clipboard, read_phone_clipboard, extract_link_from_clipboard_text
+        from weixin.core.collector import (
+            read_phone_clipboard,
+            extract_link_from_clipboard_text,
+            strip_phone_log_wrappers,
+        )
         from weixin.core.main import run_on_phone, scale_point
         from weixin.core.collector import (
             SHARE_BUTTON_X, SHARE_BUTTON_Y,
@@ -253,11 +259,18 @@ class WeixinCollector:
             COPY_LINK_X, COPY_LINK_Y,
         )
 
-        # 快速复制链接：合并 "打开分享面板" + "点击复制链接" 为一次 MCP 调用，减少部署开销
-        async def _fast_copy_link(session, tag: str, skip_clipboard: bool = False) -> str:
+        def _parse_clipboard_from_log(log: str) -> str:
+            start = log.find("CLIPBOARD_START")
+            end = log.find("CLIPBOARD_END")
+            if start < 0 or end <= start:
+                return ""
+            raw_text = log[start + len("CLIPBOARD_START"):end].strip()
+            return strip_phone_log_wrappers(raw_text)
+
+        # 快速复制链接：设哨兵+分享+复制+读剪贴板合并为一次 MCP，失败再补 1 次读剪贴板
+        async def _fast_copy_link(session, tag: str) -> str:
             sentinel = f"__WEIXIN_COPY_PENDING_{tag}__"
-            if not skip_clipboard:
-                await set_phone_clipboard(session, sentinel)
+            sentinel_esc = sentinel.replace("\\", "\\\\").replace("'", "\\'")
 
             share_x, share_y = scale_point(SHARE_BUTTON_X, SHARE_BUTTON_Y)
             tray_sx, tray_y = scale_point(SHARE_TRAY_SWIPE_START_X, SHARE_TRAY_Y)
@@ -268,33 +281,74 @@ class WeixinCollector:
 import time
 from ascript.android import action
 
+# 哨兵：用于判断剪贴板是否已被「复制链接」刷新
+try:
+    from ascript.android.system import Clipboard
+    Clipboard.set('{sentinel_esc}')
+except Exception:
+    try:
+        from android.content import ClipData, Context
+        from com.aojoy.airscript import Globals
+        ctx = Globals.getContext()
+        cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+        cm.setPrimaryClip(ClipData.newPlainText("weixin", "{sentinel_esc}"))
+    except Exception:
+        pass
+
 action.click({share_x}, {share_y})
-time.sleep(1.0)
+time.sleep(0.6)
 action.swipe({tray_sx}, {tray_y}, {tray_ex}, {tray_y}, 350)
-time.sleep(0.3)
+time.sleep(0.2)
 action.swipe({tray_sx}, {tray_y}, {tray_ex}, {tray_y}, 350)
-time.sleep(0.5)
+time.sleep(0.35)
 action.click({copy_x}, {copy_y})
-time.sleep(0.5)
+time.sleep(0.35)
+
+clip_text = ""
+try:
+    from ascript.android.system import Clipboard
+    clip_text = str(Clipboard.get() or "")
+except Exception as e:
+    print("[~] CLIPBOARD_GET_ASCRIPT_ERR:" + repr(e))
+
+if not clip_text:
+    try:
+        from android.content import Context
+        from com.aojoy.airscript import Globals
+        ctx = Globals.getContext()
+        cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+        clip = cm.getPrimaryClip()
+        if clip and clip.getItemCount() > 0:
+            clip_text = str(clip.getItemAt(0).coerceToText(ctx) or "")
+    except Exception as e:
+        print("[~] CLIPBOARD_GET_ANDROID_ERR:" + repr(e))
+
+print("CLIPBOARD_START")
+print(clip_text)
+print("CLIPBOARD_END")
 print("[OK] SHARE_COPY_DONE")
 """
-            await run_on_phone(session, code, log_sec=5)
+            out = await run_on_phone(session, code, log_sec=3)
+            raw = _parse_clipboard_from_log(out.get("log", "") or "")
+            link = extract_link_from_clipboard_text(raw)
+            if link and sentinel not in raw:
+                return link
 
-            for attempt in range(1, 6):
-                await asyncio.sleep(0.3)
-                raw_link = await read_phone_clipboard(session)
-                link = extract_link_from_clipboard_text(raw_link)
-                if link and sentinel not in raw_link:
-                    return link
+            # 偶发剪贴板未就绪：再补 1 次读剪贴板（不再轮询 5 次 MCP）
+            await asyncio.sleep(0.35)
+            raw2 = await read_phone_clipboard(session)
+            link2 = extract_link_from_clipboard_text(raw2)
+            if link2 and sentinel not in raw2:
+                return link2
             return ""
 
-        # 创建链接批次
-        batch_name = f"{self.keyword}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}"
-        batch_id = await self._create_link_batch(batch_name, source="collected")
-        await self._emit("info", f"已创建链接批次: {batch_name}")
+        # 创建/复用链接批次（挂工单时写入 WO-{order_no}，供链接池取证）
+        batch_id, batch_name = await self._resolve_phase1_batch()
+        await self._emit("info", f"已就绪链接批次: {batch_name}")
 
         import itertools
         link_count = 0
+        hit_bottom = False
         phase1_temp_paths: list[str] = []  # 临时截图路径，任务结束后统一清理
         for index in (range(1, self.max_videos + 1) if self.max_videos > 0 else itertools.count(1)):
             if self._stopped:
@@ -304,10 +358,6 @@ print("[OK] SHARE_COPY_DONE")
             limit_label = f"/{self.max_videos}" if self.max_videos > 0 else ""
             await self._emit("info", f"Phase 1 [{index}{limit_label}]: 复制链接中...")
 
-            # 后台预设剪贴板哨兵值，与底部检测并行执行
-            sentinel = f"__WEIXIN_COPY_PENDING_p1_{index}__"
-            asyncio.create_task(set_phone_clipboard(session, sentinel))
-
             # 全量采集时的滑到底检测（固定条数靠 index 终止，无需检测）
             if self.max_videos == 0:
                 try:
@@ -316,12 +366,13 @@ print("[OK] SHARE_COPY_DONE")
                         phase1_temp_paths.append(phase1_bottom_path)
                         if _is_bottom_reached(phase1_bottom_path):
                             await self._emit("warning", f"Phase 1 [{index}] 已滑到底部，停止收集链接")
+                            hit_bottom = True
                             break
                 except Exception as e:
                     self.warning(f"Phase 1 [{index}] 底部检测异常: {e}")
 
             try:
-                link_url = await _fast_copy_link(session, f"p1_{index}", skip_clipboard=True)
+                link_url = await _fast_copy_link(session, f"p1_{index}")
             except Exception as e:
                 self.warning(f"Phase 1 [{index}] 复制链接失败: {e}")
                 link_url = ""
@@ -365,6 +416,13 @@ print("[OK] SHARE_COPY_DONE")
                 except Exception as e:
                     self.warning(f"Phase 1 滑动失败: {e}")
                     break
+
+        # 全量采到底：连退 4 次，便于回到可再搜状态
+        if hit_bottom:
+            from weixin.core.main import go_back
+            await self._emit("info", "Phase 1 已滑到底，ADB 返回 4 次")
+            for _ in range(4):
+                await go_back(session)
 
         # 清理临时截图
         for p in phase1_temp_paths:
@@ -461,13 +519,19 @@ print("[OK] SHARE_COPY_DONE")
         """阶段二核心逻辑：读取链接 → 逐条 intent 打开 → 完整取证"""
         from config import INTENT_POPUP_WAIT_SECONDS, INTENT_WECHAT_OPEN_WAIT_SECONDS
 
-        # 读取尚未采集的链接
-        links = await self._get_uncollected_links()
+        # 读取尚未采集的链接，并统计跳过已采数量
+        total_links, links = await self._get_task_links_split()
+        skipped = max(0, total_links - len(links))
         if not links:
             await self._emit("warning", "Phase 2: 没有待处理的链接")
             return []
 
-        await self._emit("info", f"Phase 2: 共 {len(links)} 条链接待处理")
+        await self._emit(
+            "info",
+            f"Phase 2 断点续采：跳过已采 {skipped} 条，继续 {len(links)} 条"
+            if skipped
+            else f"Phase 2：跳过已采 0 条，共 {len(links)} 条",
+        )
 
         import weixin.core.collector as _collector
         import weixin.core.navigator as _navigator
@@ -484,6 +548,24 @@ print("[OK] SHARE_COPY_DONE")
 
         collected_count = 0
 
+        def _discard_incomplete(slug: str = "", segment=None) -> None:
+            from engine.orphan_media_cleanup import cleanup_slug_media
+            from weixin.core.media_capture import stop_capture_session
+
+            seg_path = ""
+            if segment is not None:
+                try:
+                    stop_capture_session(segment)
+                except Exception:
+                    pass
+                try:
+                    seg_path = str(getattr(segment, "local_path", "") or "")
+                except Exception:
+                    seg_path = ""
+            n = cleanup_slug_media(slug, seg_path or None)
+            if n:
+                print(f"[phase2] 已清除中断半截文件 {n} 个 slug={slug}")
+
         for idx, link in enumerate(links, 1):
             if self._stopped:
                 await self._emit("warning", "Phase 2 已被用户停止")
@@ -493,6 +575,9 @@ print("[OK] SHARE_COPY_DONE")
             await self._emit("info", f"Phase 2 [{idx}/{len(links)}]: {link.link_url[:60]}")
 
             link_url = link.link_url
+            current_slug = ""
+            segment = None
+            marked = False
 
             # 检测是否微信链接
             if "weixin.qq.com" not in (link_url or ""):
@@ -512,6 +597,8 @@ print("[OK] SHARE_COPY_DONE")
                 # 3. 等待浏览器弹窗渲染
                 await self._emit("info", f"Phase 2 [{idx}] 等待弹窗渲染 ({INTENT_POPUP_WAIT_SECONDS}s)...")
                 await asyncio.sleep(INTENT_POPUP_WAIT_SECONDS)
+                if self._stopped:
+                    break
 
                 # 4. 截图 + 豆包识别 + 点击"前往微信"
                 await click_goto_weixin_button(session, f"p2_{idx}")
@@ -519,6 +606,8 @@ print("[OK] SHARE_COPY_DONE")
                 # 5. 等待微信打开视频
                 await self._emit("info", f"Phase 2 [{idx}] 等待微信打开视频 ({INTENT_WECHAT_OPEN_WAIT_SECONDS}s)...")
                 await asyncio.sleep(INTENT_WECHAT_OPEN_WAIT_SECONDS)
+                if self._stopped:
+                    break
 
                 # 6. 构建候选（用链接自己的剧名，支持多剧合并）
                 link_kw = link.keyword or self.keyword
@@ -526,6 +615,8 @@ print("[OK] SHARE_COPY_DONE")
                 import hashlib
                 if not candidate.get("fingerprint"):
                     candidate["fingerprint"] = hashlib.md5(link_url.encode("utf-8")).hexdigest()
+                fp = str(candidate.get("fingerprint") or "")
+                current_slug = f"{fp[:10]}_{idx}"
 
                 # 7. 开始录屏
                 try:
@@ -537,6 +628,7 @@ print("[OK] SHARE_COPY_DONE")
                     await self._emit("info", f"Phase 2 [{idx}] 录屏已开始: {segment.local_path}")
                 except Exception as e:
                     self.error(f"Phase 2 [{idx}] 录屏启动失败: {e}")
+                    _discard_incomplete(current_slug, None)
                     continue
 
                 # 8. 完整证据采集（逐链接模式：不复制链接、不检测底部）
@@ -550,25 +642,40 @@ print("[OK] SHARE_COPY_DONE")
                         f"{record.video_info.get('blogger_name', '')[:20]}")
                 except Exception as e:
                     self.error(f"Phase 2 [{idx}] 采集失败: {e}")
-                    try:
-                        stop_capture_session(segment)
-                    except Exception:
-                        pass
+                    _discard_incomplete(current_slug, segment)
+                    segment = None
                     continue
+
+                if self._stopped:
+                    _discard_incomplete(current_slug, segment)
+                    segment = None
+                    await self._emit("warning", "Phase 2 已被用户停止（当前条未入库，已清除半截文件）")
+                    break
 
                 # 9. 停留
                 await self._emit("info", f"Phase 2 [{idx}] 停留 {self.hold_seconds}s ...")
                 await self._sleep_interruptible(self.hold_seconds)
 
+                if self._stopped:
+                    _discard_incomplete(current_slug, segment)
+                    segment = None
+                    await self._emit("warning", "Phase 2 已被用户停止（当前条未入库，已清除半截文件）")
+                    break
+
                 # 10. 停止录屏
+                seg_started = getattr(segment, "started_at", None)
                 try:
                     ended_at = now_iso()
                     video_path = stop_capture_session(segment)
                     video_path = self._mute_traffic_audio_in_video(str(video_path), record, segment)
-                    attach_recording_media(record, str(video_path), segment.started_at, ended_at)
+                    segment = None  # 已正常落盘，勿再当半截删
+                    attach_recording_media(record, str(video_path), seg_started, ended_at)
                     self.success(f"Phase 2 [{idx}] 录屏保存: {video_path}")
                 except Exception as e:
                     self.warning(f"Phase 2 [{idx}] 停止录屏异常: {e}")
+                    _discard_incomplete(current_slug, segment)
+                    segment = None
+                    continue
 
                 # 11. ASR
                 if self.enable_asr:
@@ -576,6 +683,19 @@ print("[OK] SHARE_COPY_DONE")
                     await self._emit("info", f"Phase 2 [{idx}] ASR 完成")
                 else:
                     await self._emit("info", "ASR 已禁用")
+
+                if self._stopped:
+                    _discard_incomplete(current_slug, None)
+                    # 录屏已落盘但未入库：删 slug 截图 + 刚挂上的录屏路径
+                    try:
+                        vp = (record.media_info or {}).get("recording_video_path") or ""
+                        if vp:
+                            from engine.orphan_media_cleanup import cleanup_slug_media
+                            cleanup_slug_media("", vp)
+                    except Exception:
+                        pass
+                    await self._emit("warning", "Phase 2 已被用户停止（当前条未入库，已清除半截文件）")
+                    break
 
                 # 12. 保存证据
                 try:
@@ -602,19 +722,44 @@ print("[OK] SHARE_COPY_DONE")
                 # 14. 标记链接已采集（仅记录 evidence_record_id）
                 if evidence_record_id:
                     await self._mark_link_collected(link.id, evidence_record_id)
-                collected_count += 1
-                self.success(f"Phase 2 [{idx}] 完成 ({collected_count}/{len(links)})")
+                    marked = True
+                    collected_count += 1
+                    self.success(f"Phase 2 [{idx}] 完成 ({collected_count}/{len(links)})")
+                else:
+                    # 未入库视为中断半截，清掉本条文件以免孤儿
+                    try:
+                        vp = (record.media_info or {}).get("recording_video_path") or ""
+                        _discard_incomplete(current_slug, None)
+                        if vp:
+                            from engine.orphan_media_cleanup import cleanup_slug_media
+                            cleanup_slug_media("", vp)
+                        if json_path:
+                            jp = Path(json_path)
+                            for victim in (jp, jp.with_suffix(".html")):
+                                try:
+                                    if victim.is_file():
+                                        victim.unlink()
+                                except OSError:
+                                    pass
+                    except Exception:
+                        pass
+                    self.warning(f"Phase 2 [{idx}] 未写入数据库，已清除本条半截文件")
 
                 # 15. 回桌面准备下一条
                 await go_home(session)
+                await asyncio.sleep(5)
 
             except Exception as e:
                 msg = _unwrap_group(e)
                 self.error(f"Phase 2 [{idx}] 处理失败: {msg}")
+                if not marked:
+                    _discard_incomplete(current_slug, segment)
+                    segment = None
                 try:
                     await go_home(session)
                 except Exception:
                     pass
+                await asyncio.sleep(5)
 
         await self._emit("info", f"{'='*50}")
         await self._emit("success", f"Phase 2 完成：成功采集 {collected_count}/{len(links)} 条")
@@ -625,6 +770,44 @@ print("[OK] SHARE_COPY_DONE")
         return [r.to_dict() if hasattr(r, 'to_dict') else r for r in self._collected_records]
 
     # ── VideoLink 数据库操作 ──
+
+    async def _resolve_phase1_batch(self) -> tuple[int, str]:
+        """解析一阶段写入的链接批次。
+
+        有 work_order_id 时复用/创建工单专属批次 WO-{order_no}（source=work_order），
+        否则创建 collected 批次 {keyword}_{时间}。
+        """
+        from sqlalchemy import select
+        from database import async_session
+        from models import LinkBatch, WorkOrder
+
+        if self.work_order_id:
+            async with async_session() as db:
+                wo = (
+                    await db.execute(
+                        select(WorkOrder).where(WorkOrder.id == self.work_order_id)
+                    )
+                ).scalar_one_or_none()
+                if not wo:
+                    raise RuntimeError(f"工单 #{self.work_order_id} 不存在，无法写入链接池")
+                batch_name = f"WO-{wo.order_no}"
+                batch = (
+                    await db.execute(select(LinkBatch).where(LinkBatch.name == batch_name))
+                ).scalar_one_or_none()
+                if not batch:
+                    batch = LinkBatch(name=batch_name, source="work_order", total_count=0)
+                    db.add(batch)
+                    await db.commit()
+                    await db.refresh(batch)
+                else:
+                    if (batch.source or "") != "work_order":
+                        batch.source = "work_order"
+                        await db.commit()
+                return batch.id, batch_name
+
+        batch_name = f"{self.keyword}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}"
+        batch_id = await self._create_link_batch(batch_name, source="collected")
+        return batch_id, batch_name
 
     async def _create_link_batch(self, name: str, source: str = "collected") -> int:
         """创建链接批次，返回 batch_id"""
@@ -700,19 +883,30 @@ print("[OK] SHARE_COPY_DONE")
 
     async def _get_uncollected_links(self) -> list:
         """从数据库读取尚未采集的 VideoLink 列表（evidence_record_id 为空）"""
-        from sqlalchemy import select
+        _, links = await self._get_task_links_split()
+        return links
+
+    async def _get_task_links_split(self) -> tuple[int, list]:
+        """返回 (任务链接总数, 未采集链接列表)。"""
+        from sqlalchemy import select, func
         from database import async_session
         from models import VideoLink
 
         if self.task_id is None:
             raise RuntimeError("task_id 为空，无法查询待采集链接")
         async with async_session() as db:
-            q = select(VideoLink).where(
-                VideoLink.evidence_record_id.is_(None),
-                VideoLink.task_id == self.task_id,
+            total = (await db.execute(
+                select(func.count(VideoLink.id)).where(VideoLink.task_id == self.task_id)
+            )).scalar() or 0
+            result = await db.execute(
+                select(VideoLink)
+                .where(
+                    VideoLink.task_id == self.task_id,
+                    VideoLink.evidence_record_id.is_(None),
+                )
+                .order_by(VideoLink.sort_order)
             )
-            result = await db.execute(q.order_by(VideoLink.sort_order))
-            return list(result.scalars().all())
+            return int(total), list(result.scalars().all())
 
     # ── 写入平台数据库 ──
 
@@ -806,19 +1000,10 @@ print("[OK] SHARE_COPY_DONE")
             screenshots_json=json.dumps(screenshots_list, ensure_ascii=False),
         )
 
-        # 计算侵权评分
+        # 计算侵权评分（与补比对共用公式）
+        from engine.script_rematch import compute_infringement_from_script_match
         sm = d.get("media_info", {}).get("script_match", {}) or {}
-        best = sm.get("best_match", {}) or {}
-        coverage = float(sm.get("coverage", 0)) if sm.get("status") == "matched" else 0.0
-        bp = float(best.get("pinyin_score", 0) or 0)
-        bc = float(best.get("char_score", 0) or 0)
-        bs = bp * 0.55 + bc * 0.45
-        segs = sm.get("segments_matched", 0) or 0
-        record.infringement_score = round(coverage * 0.35 + bs * 0.40 + min(segs / 5, 1.0) * 0.25, 4)
-        if record.infringement_score >= 0.70: record.infringement_level = "高度疑似"
-        elif record.infringement_score >= 0.50: record.infringement_level = "疑似"
-        elif record.infringement_score >= 0.30: record.infringement_level = "待观察"
-        else: record.infringement_level = "无"
+        record.infringement_score, record.infringement_level = compute_infringement_from_script_match(sm)
 
         # 打印提取摘要，方便排查空字段问题
         title = d.get("video_info", {}).get("title", d.get("candidate", {}).get("title_text", ""))

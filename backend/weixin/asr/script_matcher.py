@@ -614,7 +614,7 @@ def match_segmented(
 
     path = _resolve_script_path(keyword, script_path)
     if not path:
-        _emit(f"剧名「{keyword}」的台词文件不存在，跳过比对")
+        print(f"剧名「{keyword}」的台词文件不存在，跳过比对")
         return {"status": "script_unavailable", "segments_total": 0, "segments_matched": 0,
                 "coverage": 0.0, "avg_similarity": 0.0, "best_match": None, "segments": []}
 

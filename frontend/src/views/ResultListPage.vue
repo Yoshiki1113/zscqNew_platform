@@ -5,6 +5,26 @@
       <el-space>
         <el-button
           v-if="!isCompany"
+          type="info"
+          plain
+          size="small"
+          :loading="batchAsring"
+          @click="batchAsr"
+        >
+          一键ASR转写
+        </el-button>
+        <el-button
+          v-if="!isCompany"
+          type="warning"
+          plain
+          size="small"
+          :loading="rematching"
+          @click="rematchScripts"
+        >
+          一键台词比对
+        </el-button>
+        <el-button
+          v-if="!isCompany"
           type="success"
           size="small"
           :loading="pushingAllCompany"
@@ -255,6 +275,8 @@ const selectedIds = ref([])
 const batchPushing = ref(false)
 const batchPushingCompany = ref(false)
 const pushingAllCompany = ref(false)
+const rematching = ref(false)
+const batchAsring = ref(false)
 
 const policeEligibleCount = computed(() =>
   selectedIds.value.filter(id => {
@@ -433,6 +455,48 @@ async function pushBatchCompany() {
     ElMessage.error(e.response?.data?.detail || '批量推送失败')
   } finally {
     batchPushingCompany.value = false
+  }
+}
+
+function _evidenceScopeBody() {
+  const body = {}
+  if (workOrderId.value) body.work_order_id = workOrderId.value
+  else if (filters.taskId) body.task_id = Number(filters.taskId)
+  if (filters.keyword) body.keyword = filters.keyword
+  return body
+}
+
+async function batchAsr() {
+  batchAsring.value = true
+  try {
+    const { data } = await evidenceApi.batchAsr(_evidenceScopeBody())
+    if (!data.total) {
+      ElMessage.info(data.message || '没有需要转写的证据')
+    } else {
+      ElMessage.success(data.message || `ASR 转写完成：成功 ${data.transcribed || 0} 条`)
+    }
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '一键ASR转写失败')
+  } finally {
+    batchAsring.value = false
+  }
+}
+
+async function rematchScripts() {
+  rematching.value = true
+  try {
+    const { data } = await evidenceApi.rematchScripts(_evidenceScopeBody())
+    if (!data.total_candidates) {
+      ElMessage.info(data.message || '没有需要补比对的证据')
+    } else {
+      ElMessage.success(data.message || '补比对完成')
+    }
+    fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '一键台词比对失败')
+  } finally {
+    rematching.value = false
   }
 }
 

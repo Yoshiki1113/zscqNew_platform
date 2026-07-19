@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>嘉剧荟 · PPT演示（弃子归来震万城）</title>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --card: #fff;
+      --primary: #1a5fb4;
+      --primary-soft: #e8f0fa;
+      --success: #2e7d32;
+      --warning: #ed6c02;
+      --danger: #c62828;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --sidebar: #0f2744;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      background: #1a1a1a;
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .toolbar {
+      position: sticky; top: 0; z-index: 50;
+      background: #111827; color: #fff;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 16px; border-bottom: 1px solid #333;
+    }
+    .toolbar h1 { font-size: 14px; font-weight: 600; margin-right: 12px; white-space: nowrap; }
+    .toolbar .hint { color: #9ca3af; font-size: 12px; margin-left: auto; }
+    .tab {
+      border: 1px solid #374151; background: #1f2937; color: #e5e7eb;
+      padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    }
+    .tab:hover { border-color: #60a5fa; }
+    .tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .stage {
+      width: min(1280px, 100%);
+      margin: 16px auto 40px;
+      aspect-ratio: 16 / 9;
+      background: var(--bg);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+      display: none;
+      flex-direction: column;
+    }
+    .stage.active { display: flex; }
+    .app-bar {
+      height: 48px; background: #fff; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 16px; gap: 12px;
+    }
+    .brand { font-weight: 700; color: var(--primary); font-size: 15px; }
+    .brand small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+    .role-pill {
+      margin-left: auto; font-size: 12px; background: var(--primary-soft);
+      color: var(--primary); padding: 4px 10px; border-radius: 999px;
+    }
+    .layout { flex: 1; display: flex; min-height: 0; }
+    .side {
+      width: 180px; background: var(--sidebar); color: #cbd5e1; padding: 12px 0; font-size: 13px;
+    }
+    .side .item { padding: 10px 16px; opacity: .75; }
+    .side .item.on { background: rgba(255,255,255,.08); color: #fff; opacity: 1; border-left: 3px solid #60a5fa; }
+    .main { flex: 1; padding: 16px 20px; overflow: auto; }
+    .page-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .page-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 16px; margin-bottom: 12px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .kv { display: grid; grid-template-columns: 100px 1fr; gap: 6px 10px; font-size: 13px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { color: var(--text); }
+    .tag {
+      display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 4px;
+      background: #eef2ff; color: #3730a3;
+    }
+    .tag.ok { background: #e8f5e9; color: var(--success); }
+    .tag.warn { background: #fff3e0; color: var(--warning); }
+    .tag.bad { background: #ffebee; color: var(--danger); }
+    .tag.info { background: #e3f2fd; color: #1565c0; }
+    .btn {
+      display: inline-block; font-size: 12px; padding: 6px 12px; border-radius: 4px;
+      border: none; cursor: default; margin-right: 6px;
+    }
+    .btn.primary { background: var(--primary); color: #fff; }
+    .btn.success { background: var(--success); color: #fff; }
+    .btn.warn { background: #fff; color: var(--warning); border: 1px solid var(--warning); }
+    .btn.ghost { background: #fff; border: 1px solid var(--border); color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { background: #f8fafc; color: var(--muted); font-weight: 600; }
+    .stat {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+    }
+    .stat .n { font-size: 26px; font-weight: 700; color: var(--primary); }
+    .stat .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .log {
+      background: #0b1220; color: #a7f3d0; font-family: Consolas, monospace;
+      font-size: 11px; line-height: 1.55; padding: 12px; border-radius: 6px; height: 220px; overflow: auto;
+    }
+    .log .dim { color: #64748b; }
+    .log .info { color: #93c5fd; }
+    .log .ok { color: #86efac; }
+    .log .warn { color: #fcd34d; }
+    .asr-box {
+      background: #f8fafc; border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px; font-size: 12px; line-height: 1.7; max-height: 140px; overflow: auto;
+    }
+    .shot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .shot {
+      aspect-ratio: 9/16; background: linear-gradient(160deg, #1e293b, #334155);
+      border-radius: 6px; color: #94a3b8; font-size: 11px;
+      display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px;
+      border: 1px dashed #64748b;
+    }
+    .login-wrap {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0f2744 0%, #1a5fb4 55%, #0ea5e9 100%);
+    }
+    .login-card {
+      width: 420px; background: #fff; border-radius: 12px; padding: 28px 24px; text-align: center;
+    }
+    .login-card h2 { font-size: 22px; margin-bottom: 4px; color: var(--primary); }
+    .login-card p { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .roles { display: grid; gap: 8px; }
+    .role {
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left;
+    }
+    .role.sel { border-color: var(--primary); background: var(--primary-soft); }
+    .role b { display: block; font-size: 14px; }
+    .role span { font-size: 12px; color: var(--muted); }
+    .caption {
+      margin: 0 auto 24px; width: min(1280px, 100%); color: #d1d5db; font-size: 12px; padding: 0 8px;
+    }
+    .flow {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .flow .step {
+      background: #fff; border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 10px; font-size: 12px;
+    }
+    .flow .step.now { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .flow .arrow { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>嘉剧荟 · PPT演示稿</h1>
+    <button class="tab active" data-s="0">0 登录</button>
+    <button class="tab" data-s="1">1 公司·建工单</button>
+    <button class="tab" data-s="2">2 取证·调度台</button>
+    <button class="tab" data-s="3">3 链接池</button>
+    <button class="tab" data-s="4">4 执行监控</button>
+    <button class="tab" data-s="5">5 证据比对</button>
+    <button class="tab" data-s="6">6 公司核查</button>
+    <button class="tab" data-s="7">7 公安驾驶舱</button>
+    <span class="hint">示例短剧：弃子归来震万城 · 左右键切换 · 截 16:9 白框即可</span>
+  </div>
+
+  <p class="caption">
+    说明：本页为汇报用静态演示，界面仿平台能力。真实页面请在运行中的系统自行补截（设备管理、引流大图、HTML证据包等）。
+  </p>
+
+  <!-- 0 登录 -->
+  <section class="stage active" id="s0">
+    <div class="login-wrap">
+      <div class="login-card">
+        <h2>嘉剧荟</h2>
+        <p>短剧侵权识别与取证平台</p>
+        <div class="roles">
+          <div class="role sel"><b>公安</b><span>驾驶舱 / 已推送线索 / 只读证据</span></div>
+          <div class="role"><b>公司</b><span>工单发起 / 核查池复核</span></div>
+          <div class="role"><b>取证</b><span>搜链采证 / 推送公司与公安</span></div>
+        </div>
+        <div style="margin-top:16px"><span class="btn primary" style="width:100%;padding:10px">进入系统</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1 公司建工单 -->
+  <section class="stage" id="s1">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>公司端</small></div>
+      <span class="role-pill">当前角色：公司</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item">工单列表</div>
+        <div class="item on">新建工单</div>
+        <div class="item">帮我取证</div>
+        <div class="item">核查池</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">新建工单（工单包导入）</div>
+        <div class="page-sub">示例：上传《弃子归来震万城》剧名清单 + 台词文稿，形成已提交工单</div>
+        <div class="flow">
+          <span class="step now">① 企业交作品</span><span class="arrow">→</span>
+          <span class="step">② 取证采链</span><span class="arrow">→</span>
+          <span class="step">③ 完整取证</span><span class="arrow">→</span>
+          <span class="step">④ 台词比对</span><span class="arrow">→</span>
+          <span class="step">⑤ 复核推送</span>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:10px">工单包内容</div>
+            <dl class="kv">
+              <dt>剧名列表</dt><dd>剧名列表.xlsx（1 部）</dd>
+              <dt>台词文件</dt><dd>弃子归来震万城.docx</dd>
+              <dt>剧名</dt><dd><b>弃子归来震万城</b></dd>
+              <dt>台词状态</dt><dd><span class="tag ok">已就绪</span>（清洗入库完成）</dd>
+              <dt>工单状态</dt><dd><span class="tag info">已提交</span></dd>
+            </dl>
+            <div style="margin-top:12px">
+              <span class="btn primary">上传工单包</span>
+              <span class="btn ghost">下载样板</span>
+            </div>
+          </div>
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:10px">正版台词库（对照标准）</div>
+            <div class="asr-box">
+              【第1集】内景·破庙夜<br />
+              男主：他们都说我是弃子……可终有一日，我会让这座城重新记住我的名字。<br />
+              女主：你若归来，我便陪你走完这万里长路。<br />
+              ……（演示摘录，非全本）
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted)">说明：后续比对以该剧台词为参照，不依赖标题是否相似。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 调度台 -->
+  <section class="stage" id="s2">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>取证端</small></div>
+      <span class="role-pill">当前角色：取证</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item on">调度台</div>
+        <div class="item">链接池</div>
+        <div class="item">任务列表</div>
+        <div class="item">证据列表</div>
+        <div class="item">设备管理</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">调度台 · 待办工单</div>
+        <div class="page-sub">认领后可启动一阶段搜链，或同步企业已提交的侵权链接</div>
+        <div class="card">
+          <table>
+            <thead>
+              <tr><th>工单号</th><th>剧名</th><th>台词</th><th>链接池</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>WO-20260719-001</td>
+                <td><b>弃子归来震万城</b></td>
+                <td><span class="tag ok">就绪</span></td>
+                <td>12 条</td>
+                <td><span class="tag warn">取证中</span></td>
+                <td>
+                  <span class="btn primary">一阶段取证</span>
+                  <span class="btn ghost">进链接池</span>
+                </td>
+              </tr>
+              <tr>
+                <td>WO-20260718-008</td>
+                <td>流年似水再相逢</td>
+                <td><span class="tag info">清洗中</span></td>
+                <td>0 条</td>
+                <td><span class="tag">待认领</span></td>
+                <td><span class="btn ghost">认领</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-3">
+          <div class="stat"><div class="n">1</div><div class="l">今日认领工单</div></div>
+          <div class="stat"><div class="n">12</div><div class="l">待采链接（本剧）</div></div>
+          <div class="stat"><div class="n">5</div><div class="l">已出证据</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 链接池 -->
+  <section class="stage" id="s3">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>取证端</small></div>
+      <span class="role-pill">批次：WO-20260719-001</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item">调度台</div>
+        <div class="item on">链接池</div>
+        <div class="item">任务列表</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">链接池 · 弃子归来震万城</div>
+        <div class="page-sub">来源：一阶段搜链 8 条 + 企业帮我取证 4 条 · 可创建二阶段任务</div>
+        <div class="card" style="margin-bottom:10px">
+          <span class="btn primary">创建二阶段任务</span>
+          <span class="btn ghost">导入链接</span>
+          <span style="float:right;font-size:12px;color:var(--muted)">待采 7 · 已采 5</span>
+        </div>
+        <div class="card">
+          <table>
+            <thead>
+              <tr><th>#</th><th>链接</th><th>来源</th><th>取证状态</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>https://weixin.qq.com/sph/AWp1****</td><td>搜链</td><td><span class="tag ok">已入库</span></td></tr>
+              <tr><td>2</td><td>https://weixin.qq.com/sph/BKx9****</td><td>搜链</td><td><span class="tag ok">已入库</span></td></tr>
+              <tr><td>3</td><td>https://weixin.qq.com/sph/CLm2****</td><td>企业提交</td><td><span class="tag warn">采集中</span></td></tr>
+              <tr><td>4</td><td>https://weixin.qq.com/sph/DQn7****</td><td>搜链</td><td><span class="tag">待采</span></td></tr>
+              <tr><td>5</td><td>https://weixin.qq.com/sph/ERt4****</td><td>企业提交</td><td><span class="tag">待采</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 执行监控 -->
+  <section class="stage" id="s4">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>取证端 · 任务 #40</small></div>
+      <span class="role-pill">二阶段 · 运行中</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item">任务列表</div>
+        <div class="item on">执行监控</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">执行监控 · 弃子归来震万城</div>
+        <div class="page-sub">手机自动化：打开链接 → 进入播放页 → 录屏截图 → 引流信息 → 停留取证</div>
+        <div class="grid-2">
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:8px">实时日志</div>
+            <div class="log">
+              <div><span class="dim">14:02:11</span> <span class="info">Phase 2 [3/12]</span> https://weixin.qq.com/sph/CLm2…</div>
+              <div><span class="dim">14:02:19</span> 已点击「前往微信」</div>
+              <div><span class="dim">14:02:26</span> 录屏已开始</div>
+              <div><span class="dim">14:03:01</span> <span class="ok">发现引流标记：免费剧集</span></div>
+              <div><span class="dim">14:03:18</span> 目标账号：沐暖7197</div>
+              <div><span class="dim">14:07:05</span> 停留结束，保存录屏</div>
+              <div><span class="dim">14:07:22</span> <span class="ok">ASR 完成 · 台词比对：高度疑似</span></div>
+              <div><span class="dim">14:07:23</span> 已写入证据 #EV-1028</div>
+              <div><span class="dim">14:07:28</span> <span class="warn">回桌面，5s 后下一条…</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <dl class="kv">
+                <dt>进度</dt><dd>已完成 5 / 12</dd>
+                <dt>设备</dt><dd>演示机 · 在线</dd>
+                <dt>每条停留</dt><dd>240 秒</dd>
+                <dt>断点续采</dt><dd><span class="tag ok">支持</span>（跳过已入库，清理半截文件）</dd>
+              </dl>
+              <div style="margin-top:10px">
+                <span class="btn warn">停止</span>
+                <span class="btn ghost">断点续采</span>
+              </div>
+            </div>
+            <div class="card">
+              <div style="font-weight:600;margin-bottom:8px;font-size:13px">过程截图（示意占位）</div>
+              <div class="shot-grid">
+                <div class="shot">播放页<br/>请平台实截</div>
+                <div class="shot">资料卡<br/>请平台实截</div>
+                <div class="shot">引流标记<br/>请平台实截</div>
+                <div class="shot">录屏片段<br/>请平台实截</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 证据比对 -->
+  <section class="stage" id="s5">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>取证端 · 证据详情</small></div>
+      <span class="role-pill">EV-1028</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item">证据列表</div>
+        <div class="item on">证据详情</div>
+      </aside>
+      <div class="main">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div class="page-title" style="margin:0">证据详情 · 弃子归来震万城</div>
+          <span class="tag bad">高度疑似</span>
+          <span class="btn warn" style="margin-left:auto">一键ASR转写</span>
+          <span class="btn ghost">一键台词比对</span>
+          <span class="btn success">推送公司复核</span>
+        </div>
+        <div class="page-sub">博主：剧荒小栈 · 视频号：jx****8821 · 引流目标：沐暖7197</div>
+        <div class="grid-2">
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:8px;font-size:13px">ASR 转写文本</div>
+            <div class="asr-box">
+              他们都说我是弃子……可终有一日，我会让这座城重新记住我的名字。你若归来，我便陪你走完这万里长路。外面风雨再大，也挡不住归人的脚步……
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted)">来源：录屏音频转写（演示文案）</div>
+          </div>
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:8px;font-size:13px">剧本比对结果</div>
+            <dl class="kv">
+              <dt>状态</dt><dd><span class="tag ok">matched</span></dd>
+              <dt>覆盖率</dt><dd>78%</dd>
+              <dt>拼音分</dt><dd>0.86</dd>
+              <dt>字符分</dt><dd>0.81</dd>
+              <dt>命中</dt><dd>第1集 · 破庙夜</dd>
+              <dt>侵权分</dt><dd><b>0.82</b>（高度疑似）</dd>
+            </dl>
+            <div class="asr-box" style="margin-top:8px;max-height:80px">
+              对照台词：他们都说我是弃子……可终有一日，我会让这座城重新记住我的名字。
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div style="font-weight:600;margin-bottom:8px;font-size:13px">证据材料清单</div>
+          <table>
+            <thead><tr><th>类型</th><th>文件</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>录屏</td><td>rec_弃子_1028.mp4</td><td>播放页完整过程（请平台实截预览）</td></tr>
+              <tr><td>截图</td><td>play / profile / traffic_*.png</td><td>播放页、资料卡、引流</td></tr>
+              <tr><td>报告</td><td>evidence_1028.html</td><td>可视化证据包</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 公司核查 -->
+  <section class="stage" id="s6">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>公司端</small></div>
+      <span class="role-pill">核查池</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item">工单列表</div>
+        <div class="item on">核查池</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">核查池 · 待公司复核</div>
+        <div class="page-sub">取证端已推送 · 企业专人标注「侵权 / 未侵权」后，侵权项可推公安</div>
+        <div class="card">
+          <table>
+            <thead>
+              <tr><th>证据ID</th><th>剧名</th><th>博主</th><th>系统研判</th><th>公司复核</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>EV-1028</td><td>弃子归来震万城</td><td>剧荒小栈</td><td><span class="tag bad">高度疑似</span></td>
+                <td><span class="tag warn">待复核</span></td>
+                <td><span class="btn bad" style="background:#c62828;color:#fff">标侵权</span>
+                    <span class="btn ghost">标未侵权</span></td>
+              </tr>
+              <tr>
+                <td>EV-1021</td><td>弃子归来震万城</td><td>夜雨追剧</td><td><span class="tag warn">疑似</span></td>
+                <td><span class="tag ok">侵权</span></td>
+                <td><span class="tag info">可推公安</span></td>
+              </tr>
+              <tr>
+                <td>EV-1015</td><td>弃子归来震万城</td><td>短剧速看</td><td><span class="tag">待观察</span></td>
+                <td><span class="tag">未侵权</span></td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 公安 -->
+  <section class="stage" id="s7">
+    <div class="app-bar">
+      <div class="brand">嘉剧荟 <small>公安端</small></div>
+      <span class="role-pill">驾驶舱</span>
+    </div>
+    <div class="layout">
+      <aside class="side">
+        <div class="item on">驾驶舱</div>
+        <div class="item">已推送线索</div>
+      </aside>
+      <div class="main">
+        <div class="page-title">公安驾驶舱</div>
+        <div class="page-sub">示例剧《弃子归来震万城》相关推送动态（演示数据）</div>
+        <div class="grid-3" style="margin-bottom:12px">
+          <div class="stat"><div class="n">18</div><div class="l">本周推送公司</div></div>
+          <div class="stat"><div class="n">9</div><div class="l">公司确认侵权</div></div>
+          <div class="stat"><div class="n">6</div><div class="l">已推公安线索</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:8px">最近动态</div>
+            <table>
+              <tbody>
+                <tr><td>14:20</td><td>弃子归来震万城 · EV-1021 已推公安</td></tr>
+                <tr><td>13:55</td><td>公司复核：EV-1021 标注侵权</td></tr>
+                <tr><td>11:30</td><td>取证完成并推送公司核查池 ×3</td></tr>
+                <tr><td>09:10</td><td>工单 WO-20260719-001 一阶段搜链完成</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div style="font-weight:600;margin-bottom:8px">线索摘要（只读）</div>
+            <dl class="kv">
+              <dt>作品</dt><dd>弃子归来震万城</dd>
+              <dt>发布账号</dt><dd>夜雨追剧</dd>
+              <dt>引流账号</dt><dd>沐暖7197</dd>
+              <dt>研判</dt><dd>高度疑似 · 公司确认侵权</dd>
+              <dt>材料</dt><dd>录屏 / 截图 / 比对报告可查看</dd>
+            </dl>
+            <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+              公安端仅查看已推送线索，不直接改采集任务。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const tabs = [...document.querySelectorAll('.tab')];
+    const stages = [...document.querySelectorAll('.stage')];
+    function show(i) {
+      tabs.forEach((t, idx) => t.classList.toggle('active', idx === i));
+      stages.forEach((s, idx) => s.classList.toggle('active', idx === i));
+      history.replaceState(null, '', '#' + i);
+    }
+    tabs.forEach((t) => t.addEventListener('click', () => show(+t.dataset.s)));
+    document.addEventListener('keydown', (e) => {
+      const cur = tabs.findIndex((t) => t.classList.contains('active'));
+      if (e.key === 'ArrowRight') show(Math.min(cur + 1, tabs.length - 1));
+      if (e.key === 'ArrowLeft') show(Math.max(cur - 1, 0));
+    });
+    const hash = location.hash.replace('#', '');
+    if (/^\d+$/.test(hash)) show(+hash);
+  </script>
+</body>
+</html>

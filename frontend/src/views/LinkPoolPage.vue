@@ -39,6 +39,9 @@
               <el-tag v-else type="success" size="small">手动添加</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="关键词" min-width="160" show-overflow-tooltip>
+            <template #default="{row}">{{ row.keyword || '-' }}</template>
+          </el-table-column>
           <el-table-column label="链接数（待处理/总数）" width="160" align="center">
             <template #default="{row}">
               <span :style="{color: row.pending_count > 0 ? 'var(--primary)' : 'var(--muted)'}">

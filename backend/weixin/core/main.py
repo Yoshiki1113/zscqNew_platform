@@ -718,6 +718,7 @@ async def search_keyword(session, keyword):
     clear_input_x, clear_input_y = scale_point(957, 1703)
     submit_x, submit_y = scale_point(950, 215)
     video_tab_x, video_tab_y = scale_point(302, 350)
+    latest_tab_x, latest_tab_y = scale_point(294, 504)
 
     await run_on_phone(
         session,
@@ -735,14 +736,18 @@ time.sleep(0.8)
 action.click({submit_x}, {submit_y})
 time.sleep(2.0)
 action.click({video_tab_x}, {video_tab_y})
-time.sleep(1.8)
+time.sleep(2.0)
+print("[OK] VIDEO_TAB_CLICKED")
+action.click({latest_tab_x}, {latest_tab_y})
+time.sleep(2.0)
+print("[OK] LATEST_TAB_CLICKED")
 print("[OK] SEARCH_SUBMITTED")
 """,
-        log_sec=5,
+        log_sec=10,
     )
 
     await asyncio.sleep(1.5)
-    print("[搜索] 已提交；跳过慢速 OCR 结果页校验")
+    print("[搜索] 已点「视频」→「最新」；跳过慢速 OCR 结果页校验")
     return True
 
 

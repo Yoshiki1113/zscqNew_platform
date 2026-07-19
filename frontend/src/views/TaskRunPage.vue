@@ -13,6 +13,13 @@
           <el-button type="primary" size="small" @click="startPhase2" :loading="startingPhase2">直接采集这批链接</el-button>
           <el-button size="small" @click="$router.push('/collector/link-pool')">去链接池合并更多</el-button>
         </template>
+        <el-button
+          v-if="actionButtons.showResumePhase2"
+          type="primary"
+          size="small"
+          @click="resumePhase2"
+          :loading="resumingPhase2"
+        >断点续采</el-button>
         <el-button v-if="actionButtons.showRetry" size="small" @click="retryTask" :loading="retrying">重试</el-button>
         <el-button v-if="actionButtons.showEvidence" size="small" @click="$router.push('/evidence')">查看证据</el-button>
       </el-space>
@@ -44,7 +51,17 @@
       <div class="banner-actions">
         <el-button v-if="taskBanner.type === 'completed'" type="primary" @click="$router.push('/evidence')">查看证据列表</el-button>
         <el-button v-if="taskBanner.type === 'completed'" @click="$router.push('/collector/review-pool')">去审核</el-button>
-        <el-button v-if="['failed','stopped'].includes(taskBanner.type)" type="primary" @click="retryTask">重新执行</el-button>
+        <el-button
+          v-if="['failed','stopped'].includes(taskBanner.type) && actionButtons.showResumePhase2"
+          type="primary"
+          @click="resumePhase2"
+          :loading="resumingPhase2"
+        >断点续采</el-button>
+        <el-button
+          v-else-if="['failed','stopped'].includes(taskBanner.type)"
+          type="primary"
+          @click="retryTask"
+        >重新执行</el-button>
       </div>
     </div>
 
@@ -163,6 +180,7 @@ const starting = ref(false)
 const stopping = ref(false)
 const retrying = ref(false)
 const startingPhase2 = ref(false)
+const resumingPhase2 = ref(false)
 const collectedCount = ref(0)
 
 const statusConfig = computed(() => {
@@ -202,11 +220,14 @@ const currentProcessingText = computed(() => {
 
 const actionButtons = computed(() => {
   const s = task.value.status
+  const phase = task.value.phase || 1
+  const isPhase2Interrupted = phase === 2 && ['failed', 'stopped'].includes(s)
   return {
     showStop:     s === 'running',
     showStart:    s === 'pending',
     showPhase2:   s === 'links_collected',
-    showRetry:    ['failed', 'stopped'].includes(s),
+    showResumePhase2: isPhase2Interrupted,
+    showRetry:    ['failed', 'stopped'].includes(s) && !isPhase2Interrupted,
     showEvidence: s === 'completed',
   }
 })
@@ -328,6 +349,33 @@ async function startPhase2() {
     ElMessage.error(e.response?.data?.detail || '启动阶段二失败')
   } finally {
     startingPhase2.value = false
+  }
+}
+
+async function resumePhase2() {
+  resumingPhase2.value = true
+  try {
+    const { data } = await taskApi.startPhase2(taskId.value, {
+      hold_seconds: task.value.hold_seconds || 240,
+      capture_method: 'scrcpy',
+      enable_asr: task.value.enable_asr !== false,
+      resume: true,
+    })
+    task.value.status = 'running'
+    task.value.phase = 2
+    task.value.error_message = ''
+    taskBanner.value = { visible: false, type: '', title: '', desc: '' }
+    logs.value = []
+    // 保留已采计数，便于进度展示
+    collectedCount.value = task.value.evidence_count || collectedCount.value || 0
+    startTime.value = Date.now()
+    const n = data?.orphans_deleted || 0
+    ElMessage.success(n > 0 ? `断点续采已启动（已清除中断半截文件 ${n} 个）` : '断点续采已启动')
+    connectWS()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '断点续采失败')
+  } finally {
+    resumingPhase2.value = false
   }
 }
 

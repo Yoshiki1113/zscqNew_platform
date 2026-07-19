@@ -304,7 +304,9 @@ class TaskScheduler:
             finally:
                 await asyncio.sleep(TASK_CLEANUP_DELAY_SECONDS)  # 完成后保留供回放
                 async with self._lock:
-                    self._runners.pop(task_id, None)
+                    # 仅移除自己，避免误删断点续采后的新 runner
+                    if self._runners.get(task_id) is runner:
+                        self._runners.pop(task_id, None)
 
         runner._collector_task = asyncio.create_task(_run_and_cleanup())
 
@@ -316,20 +318,31 @@ class TaskScheduler:
             return True
         return False
 
+    def _runner_actively_collecting(self, runner: Optional[TaskRunner]) -> bool:
+        """采集是否仍在进行（不含结束后的日志保留窗口）。"""
+        if not runner:
+            return False
+        c = runner._collector
+        if c is not None:
+            return bool(getattr(c, "_running", False))
+        t = runner._collector_task
+        return t is not None and not t.done()
+
     async def start_phase2(self, task_id: int, **collector_kwargs):
         """启动阶段二：从 video_links 表读取待处理链接，逐条完整取证
 
         此方法为 link_first 模式的第二阶段，在阶段一完成（links_collected）后调用。
         创建一个新的 WeixinCollector 实例，调用 run_phase2() 处理链接。
         """
-        # 复用一个已有的 runner，仅更新 collector
+        # 已结束/已停止的 runner 仍可能占着 _runners（清理延迟），续采时换新实例
         async with self._lock:
-            runner = self._runners.get(task_id)
-            if not runner:
-                # 阶段一已完成并被清理（TASK_CLEANUP_DELAY_SECONDS 过期），
-                # 创建新的 runner
-                runner = TaskRunner(task_id, collector_kwargs)
-                self._runners[task_id] = runner
+            old = self._runners.get(task_id)
+            if old and self._runner_actively_collecting(old):
+                raise RuntimeError(f"任务 #{task_id} 已在运行中")
+            if old:
+                self._runners.pop(task_id, None)
+            runner = TaskRunner(task_id, collector_kwargs)
+            self._runners[task_id] = runner
 
         from engine.weixin_collector import WeixinCollector
 
@@ -373,6 +386,12 @@ class TaskScheduler:
 
             except asyncio.CancelledError:
                 await runner._update_task_status("stopped", error_message="用户手动停止")
+                await runner.broadcast({
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "level": "warning",
+                    "message": "任务已被停止",
+                    "type": "done",
+                })
             except Exception as e:
                 msg = _unwrap_error(e)
                 await runner._update_task_status("failed", error_message=msg)
@@ -385,9 +404,16 @@ class TaskScheduler:
             finally:
                 if runner._queue_pumper and not runner._queue_pumper.done():
                     runner._queue_pumper.cancel()
+                # 采集结束后立刻视为未运行，便于断点续采；日志仍保留一段时间
+                if runner._collector is not None:
+                    try:
+                        runner._collector._running = False
+                    except Exception:
+                        pass
                 await asyncio.sleep(TASK_CLEANUP_DELAY_SECONDS)
                 async with self._lock:
-                    self._runners.pop(task_id, None)
+                    if self._runners.get(task_id) is runner:
+                        self._runners.pop(task_id, None)
 
         runner._collector_task = asyncio.create_task(_run_and_cleanup())
 
@@ -396,7 +422,8 @@ class TaskScheduler:
         return runner.logs if runner else []
 
     def is_running(self, task_id: int) -> bool:
-        return task_id in self._runners
+        """是否正在采集（停止/失败后的日志保留窗口不算运行中）。"""
+        return self._runner_actively_collecting(self._runners.get(task_id))
 
 
 _scheduler: Optional[TaskScheduler] = None

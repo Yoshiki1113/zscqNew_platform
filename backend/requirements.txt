@@ -19,6 +19,7 @@ aiofiles>=23.0
 python-multipart>=0.0.9
 openpyxl>=3.1.0  # 侵权线索 / 工单 Excel 导入
 python-docx>=1.1.0  # 工单包台词 docx 抽取
+pywin32>=306; sys_platform == "win32"  # 旧版 .doc 经 Word 转 docx（可选，无则试 LibreOffice）
 
 # 图像处理
 Pillow>=9.0.0

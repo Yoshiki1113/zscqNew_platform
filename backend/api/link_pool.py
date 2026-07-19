@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import DEFAULT_HOLD_SECONDS, DEFAULT_CAPTURE_METHOD
 from database import get_db
-from models import Task, VideoLink, InfringementClue, LinkBatch
+from models import Task, VideoLink, InfringementClue, LinkBatch, WorkOrder
 
 router = APIRouter(tags=["链接池"])
 
@@ -36,8 +36,12 @@ async def list_batches(db: AsyncSession = Depends(get_db)):
     )
     batches = result.scalars().all()
 
-    # 统计每个批次未采集的链接数（一次 GROUP BY 查询）
     pending_counts = {}
+    # 批次名 WO-{order_no} → 工单剧名（与调度台一致，最准确）
+    drama_by_batch: dict[int, str] = {}
+    # 无工单时：采集任务 keyword / 链接上的 keyword 兜底
+    fallback_kw_by_batch: dict[int, str] = {}
+
     if batches:
         batch_ids = [b.id for b in batches]
         count_rows = (await db.execute(
@@ -48,8 +52,83 @@ async def list_batches(db: AsyncSession = Depends(get_db)):
         )).all()
         pending_counts = {row[0]: row[1] for row in count_rows}
 
+        # 1) 用工单号反查调度台剧名
+        order_nos: list[str] = []
+        batch_to_order: dict[int, str] = {}
+        for b in batches:
+            name = (b.name or "").strip()
+            if name.upper().startswith("WO-"):
+                order_no = name[3:].strip()
+                if order_no:
+                    order_nos.append(order_no)
+                    batch_to_order[b.id] = order_no
+            elif name:
+                # 兼容批次名直接等于工单号
+                order_nos.append(name)
+                batch_to_order[b.id] = name
+
+        if order_nos:
+            wo_rows = (await db.execute(
+                select(WorkOrder.order_no, WorkOrder.drama_name).where(
+                    WorkOrder.order_no.in_(list(set(order_nos)))
+                )
+            )).all()
+            drama_by_order = {
+                (ono or "").strip(): (drama or "").strip()
+                for ono, drama in wo_rows
+                if (drama or "").strip()
+            }
+            for bid, ono in batch_to_order.items():
+                drama = drama_by_order.get(ono, "")
+                if drama:
+                    drama_by_batch[bid] = drama
+
+        # 2) 仍缺关键词：用关联 Task.keyword
+        need_ids = [b.id for b in batches if b.id not in drama_by_batch]
+        task_ids = [b.task_id for b in batches if b.id in need_ids and b.task_id]
+        if task_ids:
+            task_rows = (await db.execute(
+                select(Task.id, Task.keyword).where(Task.id.in_(task_ids))
+            )).all()
+            kw_by_task = {
+                tid: (kw or "").strip()
+                for tid, kw in task_rows
+                if (kw or "").strip()
+            }
+            for b in batches:
+                if b.id in drama_by_batch or not b.task_id:
+                    continue
+                kw = kw_by_task.get(b.task_id, "")
+                if kw:
+                    fallback_kw_by_batch[b.id] = kw
+
+        # 3) 再缺：取链接表去重关键词（多关键词顿号拼接）
+        still_need = [
+            b.id for b in batches
+            if b.id not in drama_by_batch and b.id not in fallback_kw_by_batch
+        ]
+        if still_need:
+            kw_rows = (await db.execute(
+                select(VideoLink.batch_id, VideoLink.keyword).where(
+                    VideoLink.batch_id.in_(still_need),
+                    VideoLink.keyword.is_not(None),
+                    VideoLink.keyword != "",
+                )
+            )).all()
+            buckets: dict[int, list[str]] = {}
+            for bid, kw in kw_rows:
+                text = (kw or "").strip()
+                if not text:
+                    continue
+                bucket = buckets.setdefault(bid, [])
+                if text not in bucket:
+                    bucket.append(text)
+            for bid, kws in buckets.items():
+                fallback_kw_by_batch[bid] = "、".join(kws)
+
     items = []
     for b in batches:
+        keyword = drama_by_batch.get(b.id) or fallback_kw_by_batch.get(b.id) or ""
         items.append({
             "id": b.id,
             "name": b.name,
@@ -57,6 +136,8 @@ async def list_batches(db: AsyncSession = Depends(get_db)):
             "task_id": b.task_id,
             "total_count": b.total_count,
             "pending_count": pending_counts.get(b.id, 0),
+            "keywords": [keyword] if keyword else [],
+            "keyword": keyword,
             "created_at": b.created_at.isoformat() if b.created_at else None,
         })
 
@@ -265,6 +346,15 @@ async def create_task_from_pool(
     first_batch = await db.get(LinkBatch, body.batch_ids[0])
     batch_name = first_batch.name if first_batch else "(批次导入)"
     keyword = body.keyword or batch_name
+
+    # 关联工单时仅校验工单存在（不再拦截缺台词；无台词时二阶段跳过比对，可后补一键比对）
+    if body.work_order_id:
+        from models import WorkOrder
+        wo = await db.get(WorkOrder, body.work_order_id)
+        if not wo:
+            raise HTTPException(404, f"工单 #{body.work_order_id} 不存在")
+        if wo.drama_name:
+            keyword = wo.drama_name
 
     task = Task(
         keyword=keyword,

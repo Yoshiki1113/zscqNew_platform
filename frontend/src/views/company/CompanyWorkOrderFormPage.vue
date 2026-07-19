@@ -18,11 +18,11 @@
           <div class="hero-copy">
             <p class="eyebrow">WORK ORDER</p>
             <h2 class="hero-title">上传工单包</h2>
-            <p class="hero-desc">按规范打包 zip，系统将为每部剧自动创建已提交工单并入库台词。</p>
+            <p class="hero-desc">按规范打包 zip，系统将为每部剧创建已提交工单；台词可后补，取证认领后自动清洗。</p>
             <div class="hero-steps">
               <span>1. Excel 剧名</span>
               <i></i>
-              <span>2. Docx 台词</span>
+              <span>2. Doc/Docx 台词</span>
               <i></i>
               <span>3. 打包上传</span>
             </div>
@@ -33,7 +33,7 @@
             <el-icon style="margin-right:6px"><Download /></el-icon>
             下载样板 zip
           </el-button>
-          <p class="hero-hint">内含示例 Excel + 台词 docx</p>
+          <p class="hero-hint">内含示例 Excel + 台词 docx（也支持 .doc）</p>
         </div>
       </section>
 
@@ -45,13 +45,13 @@
           <ol class="tips">
             <li>新建一个文件夹（例如「工单包」）。</li>
             <li>放入 Excel：每行一部<strong>剧名</strong>（列名建议为「剧名」）。</li>
-            <li>同目录放置台词 <strong>docx</strong>，一部剧一个文件，文件名 = 剧名。</li>
-            <li>打包为 zip 后在右侧上传。</li>
+            <li>同目录放置台词 <strong>doc / docx</strong>（可缺；缺的仍建单，二阶段前需补齐）。</li>
+            <li>打包为 zip 后在右侧上传（上传时不清洗；取证端认领后再清洗）。</li>
           </ol>
           <pre class="tree">工单包/
   剧名列表.xlsx
   流年.docx
-  霸总.docx</pre>
+  霸总.doc</pre>
         </section>
 
         <section class="soft-card upload-card">
@@ -69,7 +69,7 @@
             <div class="drop-inner">
               <div class="drop-icon"><el-icon :size="28"><UploadFilled /></el-icon></div>
               <strong>{{ uploading ? '正在解析并创建工单…' : '拖拽或点击上传 zip' }}</strong>
-              <span>Excel 剧名 + 同目录 docx 台词</span>
+              <span>Excel 剧名 + 同目录 doc/docx 台词</span>
             </div>
           </el-upload>
 
@@ -78,11 +78,20 @@
             <ul v-if="result.created?.length">
               <li v-for="c in result.created" :key="c.id">
                 <router-link :to="`/company/work-orders/${c.id}`">{{ c.order_no }}</router-link>
-                — {{ c.drama_name }}（台词 {{ c.chars }} 字）
+                — {{ c.drama_name }}
+                <span v-if="c.script_status === 'ready'">（台词已就绪）</span>
+                <span v-else-if="c.script_status === 'pending'">（台词待认领后清洗）</span>
+                <span v-else-if="c.has_script_file === false || c.script_status === 'none'">（缺台词文件）</span>
               </li>
             </ul>
             <p v-if="result.missing_script?.length" class="warn">
-              缺台词未建单：{{ result.missing_script.join('、') }}
+              缺台词文件（已建单，可后补）：{{ result.missing_script.join('、') }}
+            </p>
+            <p v-if="result.script_pending?.length" class="warn">
+              待清洗：{{ result.script_pending.join('、') }}
+            </p>
+            <p v-if="result.unused_docx?.length" class="warn">
+              zip 内未匹配的剧本文件：{{ result.unused_docx.join('、') }}
             </p>
             <div class="btn-row" style="margin-top:12px;">
               <el-button type="primary" round @click="$router.push('/company')">查看工单列表</el-button>

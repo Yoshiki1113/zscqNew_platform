@@ -61,6 +61,7 @@ class TaskResponse(BaseModel):
     finished_at: Optional[datetime] = None
     created_at: datetime
     error_message: str = ""
+    orphans_deleted: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -72,7 +73,7 @@ class TaskListResponse(BaseModel):
     page_size: int
 
 
-def _task_to_response(task: Task, evidence_count: int = 0) -> TaskResponse:
+def _task_to_response(task: Task, evidence_count: int = 0, orphans_deleted: int = 0) -> TaskResponse:
     return TaskResponse(
         id=task.id,
         keyword=task.keyword,
@@ -91,6 +92,7 @@ def _task_to_response(task: Task, evidence_count: int = 0) -> TaskResponse:
         finished_at=task.finished_at,
         created_at=task.created_at or datetime.now(),
         error_message=task.error_message or "",
+        orphans_deleted=orphans_deleted,
     )
 
 
@@ -238,6 +240,7 @@ async def start_task(task_id: int, db: AsyncSession = Depends(get_db)):
         capture_method=task.capture_method,
         enable_asr=task.enable_asr,
         skip_search=task.skip_search,
+        work_order_id=task.work_order_id,
     ))
     return _task_to_response(task, evidence_count or 0)
 
@@ -294,6 +297,7 @@ async def retry_task(task_id: int, background_tasks: BackgroundTasks, db: AsyncS
         capture_method=task.capture_method,
         enable_asr=task.enable_asr,
         skip_search=task.skip_search,
+        work_order_id=task.work_order_id,
     ))
 
     return _task_to_response(task, evidence_count or 0)
@@ -305,6 +309,7 @@ class StartPhase2Request(BaseModel):
     hold_seconds: int = DEFAULT_HOLD_SECONDS
     capture_method: str = DEFAULT_CAPTURE_METHOD
     enable_asr: bool = True
+    resume: bool = False  # 前端断点续采传 true，仅日志区分
 
 
 @router.post("/tasks/{task_id}/start-phase2", response_model=TaskResponse)
@@ -317,19 +322,51 @@ async def start_phase2(
 
     支持前端直接传入取证参数（停留时长、ASR等），
     也可不传则使用默认值。
-    前置条件：任务状态为 "links_collected"
+    前置条件：
+      - links_collected（首次开二阶段）
+      - stopped/failed 且 phase==2（断点续采）
     """
     task, evidence_count = await _get_task_with_count(task_id, db)
 
-    if task.status != "links_collected":
-        raise HTTPException(400, f"阶段一尚未完成，当前状态: {task.status}")
+    if task.status == "running":
+        raise HTTPException(400, "任务正在运行中")
+
+    is_first = task.status == "links_collected"
+    is_resume = task.status in ("stopped", "failed") and (task.phase or 1) == 2
+    if not is_first and not is_resume:
+        raise HTTPException(
+            400,
+            f"当前状态不可启动阶段二: status={task.status}, phase={task.phase}",
+        )
+
+    # 待采链接（续采与首次均校验）
+    pending = (await db.execute(
+        select(func.count(VideoLink.id)).where(
+            VideoLink.task_id == task_id,
+            VideoLink.evidence_record_id.is_(None),
+        )
+    )).scalar() or 0
+    if pending == 0:
+        raise HTTPException(400, "没有待续采链接" if is_resume or body.resume else "没有待处理的链接")
 
     sched = get_scheduler()
     if sched.is_running(task_id):
         raise HTTPException(400, "任务已在运行中")
 
-    # 标记进入阶段二
+    orphans_deleted = 0
+    if is_resume or body.resume:
+        from engine.orphan_media_cleanup import cleanup_task_orphan_media
+
+        summary = await cleanup_task_orphan_media(task_id, since=task.started_at)
+        orphans_deleted = int(summary.get("deleted") or 0)
+        print(
+            f"[start-phase2] 断点续采 task=#{task_id} pending={pending} "
+            f"orphans_deleted={orphans_deleted}"
+        )
+
+    # 标记进入阶段二（status 由 scheduler 置 running）
     task.phase = 2
+    task.error_message = ""
     await db.commit()
 
     # 获取设备连接参数
@@ -346,9 +383,10 @@ async def start_phase2(
         hold_seconds=body.hold_seconds,
         capture_method=body.capture_method,
         enable_asr=body.enable_asr,
+        work_order_id=task.work_order_id,
     ))
 
-    return _task_to_response(task, evidence_count or 0)
+    return _task_to_response(task, evidence_count or 0, orphans_deleted=orphans_deleted)
 
 
 @router.get("/tasks/{task_id}/video-links")

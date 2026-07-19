@@ -25,12 +25,24 @@ WORK_ORDER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 _SAFE_NAME_RE = re.compile(r'[\\/:*?"<>|]+')
+# 主名（别名）/ 主名(别名) → 只保留括号外主名
+_PAREN_ALIAS_RE = re.compile(r"[（(][^）)]*[）)]")
 
 
 def _safe_keyword(name: str) -> str:
     s = (name or "").strip()
     s = _SAFE_NAME_RE.sub("_", s)
     return s[:180]
+
+
+def _canonical_drama_name(name: str) -> str:
+    """只保留主名：去掉中英文括号及其中的别名/营销后缀。"""
+    s = (name or "").strip()
+    if not s:
+        return ""
+    s = _PAREN_ALIAS_RE.sub("", s)
+    s = re.sub(r"\s+", " ", s).strip(" \t-—–·:：")
+    return s
 
 
 def _decode_text_bytes(data: bytes) -> str:
@@ -86,7 +98,7 @@ def _parse_keywords_from_excel(content: bytes) -> list[str]:
         val = row[col_idx]
         if val is None:
             continue
-        kw = str(val).strip()
+        kw = _canonical_drama_name(str(val))
         if not kw or kw in seen:
             continue
         seen.add(kw)
@@ -221,73 +233,197 @@ def _parse_links_from_bytes(content: bytes, filename: str) -> list[str]:
 
 
 def _extract_docx_text(data: bytes) -> str:
-    """从 docx 字节提取纯文本。"""
-    from io import BytesIO
-    from docx import Document
+    """从 docx 字节提取纯文本（兼容旧调用）。"""
+    from weixin.asr.script_cleaner import extract_docx_text
 
-    doc = Document(BytesIO(data))
-    parts = []
-    for para in doc.paragraphs:
-        t = (para.text or "").strip()
-        if t:
-            parts.append(t)
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [(c.text or "").strip() for c in row.cells]
-            line = "\t".join(c for c in cells if c)
-            if line:
-                parts.append(line)
-    return "\n".join(parts)
+    return extract_docx_text(data)
 
 
-def _scan_zip_entries(zip_bytes: bytes) -> tuple[list[tuple[str, bytes]], dict[str, bytes]]:
-    """返回 (excel列表[(name,bytes)], docx索引{stem: bytes})。"""
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _cjk_count(s: str) -> int:
+    return sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+
+
+def _fix_zip_name(name: str) -> str:
+    """尽力把 zip 内文件名修成可读中文。"""
+    name = (name or "").replace("\\", "/")
+    if _cjk_count(name) > 0:
+        return name
+    # 旧工具：原始字节按 cp437 解出来，再按 gbk/gb18030 还原
+    for enc in ("gbk", "gb18030", "utf-8"):
+        try:
+            fixed = name.encode("cp437", errors="strict").decode(enc)
+            if _cjk_count(fixed) > _cjk_count(name):
+                return fixed.replace("\\", "/")
+        except Exception:
+            continue
+    # 宽松：忽略无法映射的码点
+    try:
+        raw = name.encode("cp437", errors="replace")
+        # replace 会插入 ?，改用 latin-1 保字节
+        raw = name.encode("latin-1", errors="ignore")
+        for enc in ("gbk", "gb18030", "utf-8"):
+            try:
+                fixed = raw.decode(enc)
+                if _cjk_count(fixed) > 0:
+                    return fixed.replace("\\", "/")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return name
+
+
+def _norm_drama_key(s: str) -> str:
+    """剧名/文件名归一化，便于模糊匹配。"""
+    t = (s or "").strip().lower()
+    for ch in (
+        " ", "\u3000", "_", "-", "—", "–", "·", ".", "。", "，", ",",
+        "（", "）", "(", ")", "【", "】", "[", "]", "《", "》", ":", "：",
+        "?", "？", "!", "！",
+    ):
+        t = t.replace(ch, "")
+    return t
+
+
+def _detect_script(filename: str, data: bytes) -> str | None:
+    """返回脚本扩展名 .doc/.docx，非脚本则 None。"""
+    lower = (filename or "").lower().replace("\\", "/")
+    base = lower.rsplit("/", 1)[-1]
+    if base.startswith("~"):
+        return None
+    if lower.endswith(".docx"):
+        return ".docx"
+    if lower.endswith(".doc"):
+        return ".doc"
+    # 文件名乱码丢了后缀时，靠魔数识别
+    if data[:8] == _OLE_MAGIC:
+        return ".doc"
+    if data[:2] == b"PK" and (b"word/" in data[:4096] or b"WordDocument" in data[:4096]):
+        return ".docx"
+    return None
+
+
+def _scan_zip_once(zip_bytes: bytes, metadata_encoding: str | None) -> tuple[list[tuple[str, bytes]], dict[str, tuple[bytes, str]], int]:
+    """按指定 metadata_encoding 扫一遍，返回 (excels, scripts, cjk_score)。"""
     import zipfile
     from io import BytesIO
 
     excels: list[tuple[str, bytes]] = []
-    docx_index: dict[str, bytes] = {}
-    with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+    script_index: dict[str, tuple[bytes, str]] = {}
+    score = 0
+    kwargs = {}
+    if metadata_encoding:
+        kwargs["metadata_encoding"] = metadata_encoding
+    with zipfile.ZipFile(BytesIO(zip_bytes), **kwargs) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            name = info.filename.replace("\\", "/")
+            # metadata_encoding 已按 gbk 解时直接用；否则再尝试修复
+            name = (info.filename or "").replace("\\", "/")
+            if not metadata_encoding:
+                name = _fix_zip_name(name)
             if name.startswith("__MACOSX/") or "/." in f"/{name}":
                 continue
-            lower = name.lower()
+            score += _cjk_count(name)
             parts = [p for p in name.split("/") if p]
             if not parts:
                 continue
             data = zf.read(info)
-            if lower.endswith((".xlsx", ".xls")):
-                excels.append((parts[-1], data))
-            elif lower.endswith(".docx") and not parts[-1].startswith("~"):
-                stem = Path(parts[-1]).stem.strip()
-                if stem:
-                    docx_index[stem] = data
-    return excels, docx_index
+            lower = name.lower()
+            if lower.endswith((".xlsx", ".xls")) or (
+                data[:2] == b"PK" and b"xl/" in data[:4096]
+            ):
+                # 表格以扩展名优先；魔数兜底时用原名
+                excel_name = parts[-1] if lower.endswith((".xlsx", ".xls")) else (parts[-1] + ".xlsx")
+                excels.append((excel_name, data))
+                continue
+            ext = _detect_script(name, data)
+            if not ext:
+                continue
+            stem = Path(parts[-1]).stem.strip().rstrip(".?")
+            if not stem or _cjk_count(stem) == 0:
+                # 文件名仍乱码：用占位 stem，后续按「唯一剧本」强制配对
+                stem = f"script_{len(script_index)+1}"
+            if stem in script_index and ext == ".doc":
+                continue
+            script_index[stem] = (data, ext)
+    return excels, script_index, score
 
 
-def _match_docx_to_keywords(keywords: list[str], docx_index: dict[str, bytes]) -> dict:
+def _scan_zip_entries(zip_bytes: bytes) -> tuple[list[tuple[str, bytes]], dict[str, tuple[bytes, str]]]:
+    """返回 (excel列表[(name,bytes)], 剧本索引{stem: (bytes, ext)})。
+
+    WinRAR 中文 zip 常用 GBK 文件名；依次尝试 gbk / gb18030 / 默认+修复，取中文最多的结果。
+    """
+    candidates: list[tuple[int, list, dict]] = []
+    for enc in ("gbk", "gb18030", None):
+        try:
+            excels, scripts, score = _scan_zip_once(zip_bytes, enc)
+            # 有剧本/表格时加分，避免空扫赢
+            bonus = 10 * len(scripts) + 5 * len(excels)
+            candidates.append((score + bonus, excels, scripts))
+        except Exception as e:
+            print(f"[import-package] zip scan enc={enc!r} fail: {e}")
+    if not candidates:
+        return [], {}
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _, excels, scripts = candidates[0]
+    return excels, scripts
+
+
+def _match_docx_to_keywords(keywords: list[str], script_index: dict) -> dict:
     matched = []
     missing = []
     used: set[str] = set()
+
+    def _find_hit(kw: str) -> str | None:
+        if kw in script_index and kw not in used:
+            return kw
+        nkw = _norm_drama_key(kw)
+        for zk in script_index:
+            if zk in used:
+                continue
+            if _norm_drama_key(zk) == nkw:
+                return zk
+        best = None
+        best_score = 0
+        for zk in script_index:
+            if zk in used:
+                continue
+            nzk = _norm_drama_key(zk)
+            if not nzk or not nkw:
+                continue
+            if nkw in nzk or nzk in nkw:
+                score = min(len(nkw), len(nzk))
+                if score >= 2 and score > best_score:
+                    best, best_score = zk, score
+        return best
+
     for kw in keywords:
-        hit = None
-        if kw in docx_index:
-            hit = kw
-        else:
-            for zk in docx_index:
-                if zk.replace(" ", "") == kw.replace(" ", ""):
-                    hit = zk
-                    break
+        hit = _find_hit(kw)
         if hit:
             matched.append({"keyword": kw, "docx_key": hit})
             used.add(hit)
         else:
             missing.append(kw)
-    unused = [k for k in docx_index if k not in used]
-    return {"matched": matched, "missing": missing, "unused_docx": unused}
+
+    # 强制兜底：剩余剧名与剩余剧本按体积从大到小配对（彻底无视文件名乱码）
+    unused = [k for k in script_index if k not in used]
+    unused.sort(key=lambda k: len(script_index[k][0]), reverse=True)
+    while missing and unused:
+        kw = missing.pop(0)
+        hit = unused.pop(0)
+        matched.append({"keyword": kw, "docx_key": hit})
+        used.add(hit)
+
+    return {
+        "matched": matched,
+        "missing": missing,
+        "unused_docx": [k for k in script_index if k not in used],
+    }
 
 
 def _parse_help_collect_excel(content: bytes) -> list[dict]:
@@ -339,7 +475,7 @@ def _parse_help_collect_excel(content: bytes) -> list[dict]:
         if platform_idx < len(row) and row[platform_idx] is not None:
             platform = str(row[platform_idx]).strip()
         if drama_idx < len(row) and row[drama_idx] is not None:
-            drama = str(row[drama_idx]).strip()
+            drama = _canonical_drama_name(str(row[drama_idx]))
         if link_idx < len(row) and row[link_idx] is not None:
             link = str(row[link_idx]).strip()
         if not platform and not drama and not link:
@@ -526,6 +662,9 @@ async def _refresh_work_order_stats(db: AsyncSession, work_order_id: int) -> Non
 
 
 def _wo_to_dict(wo: WorkOrder, attachments: list | None = None) -> dict:
+    from engine.script_clean_jobs import SCRIPT_STATUS_LABELS
+
+    script_status = getattr(wo, "script_status", None) or "none"
     return {
         "id": wo.id,
         "order_no": wo.order_no,
@@ -540,6 +679,11 @@ def _wo_to_dict(wo: WorkOrder, attachments: list | None = None) -> dict:
         "evidence_count": wo.evidence_count or 0,
         "company_pushed_count": getattr(wo, "company_pushed_count", None) or 0,
         "pushed_count": wo.pushed_count or 0,
+        "script_status": script_status,
+        "script_status_label": SCRIPT_STATUS_LABELS.get(script_status, script_status),
+        "script_source_hash": getattr(wo, "script_source_hash", None) or "",
+        "script_cleaned_at": str(wo.script_cleaned_at) if getattr(wo, "script_cleaned_at", None) else "",
+        "script_error": getattr(wo, "script_error", None) or "",
         "submitted_at": str(wo.submitted_at) if wo.submitted_at else "",
         "started_at": str(wo.started_at) if wo.started_at else "",
         "completed_at": str(wo.completed_at) if wo.completed_at else "",
@@ -597,9 +741,12 @@ async def list_work_orders(
 
 @router.post("/work-orders", status_code=201)
 async def create_work_order(body: WorkOrderCreate, db: AsyncSession = Depends(get_db)):
+    drama = _canonical_drama_name(body.drama_name)
+    if not drama:
+        raise HTTPException(400, "剧名不能为空")
     wo = WorkOrder(
         order_no=_gen_order_no(),
-        drama_name=body.drama_name.strip(),
+        drama_name=drama,
         description=body.description or "",
         priority=body.priority,
         deadline=body.deadline,
@@ -673,20 +820,27 @@ async def import_work_order_package(
     submitter: str = Form("公司用户"),
     db: AsyncSession = Depends(get_db),
 ):
-    """新建工单：上传 zip（Excel 剧名 + 同目录 docx 台词），每剧自动创建已提交工单。"""
+    """新建工单：上传 zip 入库（不清洗台词）。缺台词也建单，仅告知；清洗延后到取证认领。"""
+    from engine.script_clean_jobs import (
+        SCRIPT_STATUS_NONE,
+        SCRIPT_STATUS_PENDING,
+        SCRIPT_STATUS_READY,
+        library_ready_for_hash,
+        sha256_bytes,
+    )
+
     fname = Path(file.filename or "package.zip").name
     if not fname.lower().endswith(".zip"):
         raise HTTPException(400, "请上传 .zip 工单包")
 
     zip_bytes = await file.read()
     try:
-        excels, docx_index = _scan_zip_entries(zip_bytes)
+        excels, script_index = _scan_zip_entries(zip_bytes)
     except Exception as e:
         raise HTTPException(400, f"无法读取 zip: {e}") from e
 
     if not excels:
         raise HTTPException(400, "zip 中未找到 Excel（.xlsx），请放入剧名列表")
-    # 优先文件名含「剧名」的表，否则取第一个
     excel_bytes = None
     excel_name = ""
     for n, data in excels:
@@ -700,72 +854,111 @@ async def import_work_order_package(
     if not keywords:
         raise HTTPException(400, f"「{excel_name}」中未解析到剧名")
 
-    pairing = _match_docx_to_keywords(keywords, docx_index)
-    created = []
+    pairing = _match_docx_to_keywords(keywords, script_index)
+    matched_map = {m["keyword"]: m for m in pairing["matched"]}
     missing_script = list(pairing["missing"])
+    script_pending: list[str] = []
+    script_ready: list[str] = []
+    created = []
     now = datetime.now()
+    import_id = uuid.uuid4().hex[:12]
 
-    for item in pairing["matched"]:
-        kw = item["keyword"]
-        raw = docx_index[item["docx_key"]]
-        try:
-            script_text = _extract_docx_text(raw)
-        except Exception as e:
-            missing_script.append(kw)
-            continue
-        if not script_text.strip():
-            missing_script.append(kw)
-            continue
+    # 整包留存
+    import_dir = WORK_ORDER_UPLOAD_DIR / "imports" / import_id
+    import_dir.mkdir(parents=True, exist_ok=True)
+    package_path = import_dir / "package.zip"
+    package_path.write_bytes(zip_bytes)
 
-        dest = _install_script_text(kw, script_text)
+    print(
+        f"[import-package] import_id={import_id} excel={excel_name!r} "
+        f"keywords={keywords} scripts={list(script_index.keys())} "
+        f"matched={pairing['matched']} missing={pairing['missing']}"
+    )
+
+    for kw in keywords:
+        hit = matched_map.get(kw)
+        script_status = SCRIPT_STATUS_NONE
+        source_hash = ""
+        att_info = None
+
+        if hit:
+            raw, ext = script_index[hit["docx_key"]]
+            source_hash = sha256_bytes(raw)
+            if library_ready_for_hash(kw, source_hash):
+                script_status = SCRIPT_STATUS_READY
+                script_ready.append(kw)
+            else:
+                script_status = SCRIPT_STATUS_PENDING
+                script_pending.append(kw)
+            att_info = (raw, ext, f"{hit['docx_key']}{ext}", hit["docx_key"])
+
         wo = WorkOrder(
             order_no=_gen_order_no(),
             drama_name=kw,
-            description=f"由工单包导入（{fname}）",
+            description=f"由工单包导入（{fname}，import={import_id}）",
             status="submitted",
             priority=5,
             submitter=submitter,
             submitted_at=now,
             created_at=now,
             updated_at=now,
+            script_status=script_status,
+            script_source_hash=source_hash,
+            script_cleaned_at=now if script_status == SCRIPT_STATUS_READY else None,
+            script_error="",
         )
         db.add(wo)
         await db.flush()
 
-        # 保存原始 docx 附件
-        dest_dir = WORK_ORDER_UPLOAD_DIR / str(wo.id)
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        att_path = dest_dir / f"{uuid.uuid4().hex[:8]}_{item['docx_key']}.docx"
-        att_path.write_bytes(raw)
-        db.add(WorkOrderAttachment(
-            work_order_id=wo.id,
-            file_name=f"{item['docx_key']}.docx",
-            file_type="script",
-            file_path=str(att_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            file_size=len(raw),
-            created_at=now,
-        ))
+        if att_info:
+            raw, ext, script_name, stem = att_info
+            dest_dir = WORK_ORDER_UPLOAD_DIR / str(wo.id)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            safe_stem = _safe_keyword(stem) or "script"
+            att_path = dest_dir / f"{uuid.uuid4().hex[:8]}_{safe_stem}{ext}"
+            att_path.write_bytes(raw)
+            db.add(WorkOrderAttachment(
+                work_order_id=wo.id,
+                file_name=script_name,
+                file_type="script",
+                file_path=str(att_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                file_size=len(raw),
+                created_at=now,
+            ))
+
         created.append({
             "id": wo.id,
             "order_no": wo.order_no,
             "drama_name": kw,
-            "script_path": str(dest.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            "chars": len(script_text),
+            "script_status": script_status,
+            "has_script_file": bool(att_info),
         })
 
-    # 仍创建缺台词的工单？计划：有台词才建单。缺台词只进 missing。
     await db.commit()
+
+    unused = pairing["unused_docx"]
+    parts = [f"已创建 {len(created)} 张工单"]
+    if script_pending:
+        parts.append(f"{len(script_pending)} 部台词待取证端认领后清洗")
+    if script_ready:
+        parts.append(f"{len(script_ready)} 部台词已就绪可复用")
+    if missing_script:
+        parts.append(f"{len(missing_script)} 部缺台词文件（仍已建单）")
+    if unused:
+        parts.append(f"未匹配剧本: {', '.join(unused)}")
 
     return {
         "created": created,
         "created_count": len(created),
         "missing_script": missing_script,
-        "unused_docx": pairing["unused_docx"],
+        "script_pending": script_pending,
+        "script_ready": script_ready,
+        "unused_docx": unused,
+        "script_files": list(script_index.keys()),
         "excel_name": excel_name,
-        "message": (
-            f"已创建 {len(created)} 张工单"
-            + (f"，{len(missing_script)} 部缺台词未建单" if missing_script else "")
-        ),
+        "import_id": import_id,
+        "package_path": str(package_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+        "message": "；".join(parts),
     }
 
 
@@ -971,7 +1164,10 @@ async def update_work_order(
     if wo.status not in ("draft", "submitted"):
         raise HTTPException(400, "仅草稿或已提交状态可编辑基本信息")
     if body.drama_name is not None:
-        wo.drama_name = body.drama_name.strip()
+        drama = _canonical_drama_name(body.drama_name)
+        if not drama:
+            raise HTTPException(400, "剧名不能为空")
+        wo.drama_name = drama
     if body.description is not None:
         wo.description = body.description
     if body.priority is not None:
@@ -1025,6 +1221,13 @@ async def assign_work_order(
     body: WorkOrderAssign,
     db: AsyncSession = Depends(get_db),
 ):
+    from engine.script_clean_jobs import (
+        SCRIPT_STATUS_PENDING,
+        SCRIPT_STATUS_READY,
+        library_ready_for_hash,
+        schedule_clean_work_order,
+    )
+
     wo = (await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))).scalar_one_or_none()
     if not wo:
         raise HTTPException(404, "工单不存在")
@@ -1035,8 +1238,27 @@ async def assign_work_order(
         wo.status = "collecting"
         wo.started_at = datetime.now()
     wo.updated_at = datetime.now()
+
+    # 认领时：有源文件且未就绪 → 触发异步清洗；哈希已命中则直接 ready
+    script_status = getattr(wo, "script_status", None) or "none"
+    source_hash = getattr(wo, "script_source_hash", None) or ""
+    if script_status not in ("none",) and wo.drama_name:
+        if source_hash and library_ready_for_hash(wo.drama_name, source_hash):
+            wo.script_status = SCRIPT_STATUS_READY
+            if not wo.script_cleaned_at:
+                wo.script_cleaned_at = datetime.now()
+            wo.script_error = ""
+        elif script_status in (SCRIPT_STATUS_PENDING, "failed", "cleaning"):
+            # cleaning 卡住时也允许重新调度
+            if script_status != "cleaning":
+                wo.script_status = SCRIPT_STATUS_PENDING
+
     await db.commit()
     await db.refresh(wo)
+
+    if (getattr(wo, "script_status", None) or "") in (SCRIPT_STATUS_PENDING, "cleaning"):
+        schedule_clean_work_order(wo.id)
+
     return _wo_to_dict(wo)
 
 
@@ -1047,6 +1269,14 @@ async def upload_attachment(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
+    from engine.script_clean_jobs import (
+        SCRIPT_STATUS_PENDING,
+        SCRIPT_STATUS_READY,
+        library_ready_for_hash,
+        schedule_clean_work_order,
+        sha256_bytes,
+    )
+
     wo = (await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))).scalar_one_or_none()
     if not wo:
         raise HTTPException(404, "工单不存在")
@@ -1060,17 +1290,34 @@ async def upload_attachment(
     async with aiofiles.open(dest_path, "wb") as fh:
         await fh.write(content)
 
-    # 剧本同步到 scripts 目录供比对使用
+    # 剧本：只存附件与哈希，清洗延后（认领或此处触发）
     if file_type == "script" and wo.drama_name:
-        # 单文件 zip：解压合并全部 txt；否则按文本解码写入
-        script_text = ""
-        if safe_name.lower().endswith(".zip"):
-            zidx = _index_zip_scripts(content)
-            chunks = [_decode_text_bytes(v) for v in zidx.values()]
-            script_text = "\n\n".join(chunks)
-        else:
-            script_text = _decode_text_bytes(content)
-        _install_script_text(wo.drama_name, script_text)
+        lower = safe_name.lower()
+        if lower.endswith((".doc", ".docx")):
+            source_hash = sha256_bytes(content)
+            wo.script_source_hash = source_hash
+            if library_ready_for_hash(wo.drama_name, source_hash):
+                wo.script_status = SCRIPT_STATUS_READY
+                wo.script_cleaned_at = datetime.now()
+                wo.script_error = ""
+            else:
+                wo.script_status = SCRIPT_STATUS_PENDING
+                wo.script_cleaned_at = None
+                wo.script_error = ""
+        elif lower.endswith(".txt") or lower.endswith(".zip"):
+            # 兼容直接传纯文本 / txt：仍即时写入 raw（已是对白）
+            script_text = ""
+            if lower.endswith(".zip"):
+                zidx = _index_zip_scripts(content)
+                chunks = [_decode_text_bytes(v) for v in zidx.values()]
+                script_text = "\n\n".join(chunks)
+            else:
+                script_text = _decode_text_bytes(content)
+            _install_script_text(wo.drama_name, script_text)
+            wo.script_status = SCRIPT_STATUS_READY
+            wo.script_source_hash = sha256_bytes(content)
+            wo.script_cleaned_at = datetime.now()
+            wo.script_error = ""
 
     att = WorkOrderAttachment(
         work_order_id=work_order_id,
@@ -1090,19 +1337,29 @@ async def upload_attachment(
         link_import = await _import_links_to_batch(db, wo, urls)
 
     await db.commit()
-    await db.refresh(att)
-    result = {
-        "id": att.id,
-        "file_name": att.file_name,
-        "file_type": att.file_type,
-        "file_path": att.file_path,
-        "file_size": att.file_size,
-    }
-    if link_import:
-        result["link_import"] = link_import
-    return result
+    await db.refresh(wo)
 
+    if file_type == "script" and (getattr(wo, "script_status", None) or "") == SCRIPT_STATUS_PENDING:
+        schedule_clean_work_order(wo.id)
 
+    atts = (
+        await db.execute(
+            select(WorkOrderAttachment).where(WorkOrderAttachment.work_order_id == work_order_id)
+        )
+    ).scalars().all()
+    data = _wo_to_dict(wo, [
+        {
+            "id": a.id,
+            "file_name": a.file_name,
+            "file_type": a.file_type,
+            "file_path": a.file_path,
+            "file_size": a.file_size,
+        }
+        for a in atts
+    ])
+    if link_import is not None:
+        data["link_import"] = link_import
+    return data
 
 
 @router.post("/work-orders/{work_order_id}/import-links")
