@@ -10,3 +10,11 @@ test
 dist
 node_modules
 .paddlex-cache
+
+# Python 编译字节码缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
