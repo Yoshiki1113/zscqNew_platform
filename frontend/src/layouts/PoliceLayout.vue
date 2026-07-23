@@ -8,7 +8,7 @@
           </svg>
         </div>
       </div>
-      <h1 class="ph-name">嘉剧荟驾驶舱</h1>
+      <h1 class="ph-name">嘉剧荟版权保护智能侦测平台</h1>
       <div class="ph-right">
         <RoleSwitcher variant="header" />
       </div>
@@ -78,12 +78,15 @@ import RoleSwitcher from '@/components/RoleSwitcher.vue'
 
 .ph-name {
   margin: 0;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 800;
-  letter-spacing: 4px;
+  letter-spacing: 2px;
   text-align: center;
   white-space: nowrap;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  padding: 0 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ph-right :deep(.header .role-btn) {

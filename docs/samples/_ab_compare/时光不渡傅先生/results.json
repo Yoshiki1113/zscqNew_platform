@@ -1,0 +1,636 @@
+{
+  "clean_meta": {
+    "mode": "llm",
+    "raw_chars": 11491,
+    "raw_lines": 614,
+    "cleaned_chars": 3459,
+    "cleaned_lines": 197
+  },
+  "counts": {
+    "total": 191,
+    "with_asr": 187,
+    "with_media": 191
+  },
+  "results": [
+    {
+      "id": 27,
+      "blogger_name": "花开富贵58590",
+      "title": "时光不渡傅先生",
+      "asr_chars": 1393,
+      "asr_preview": "傅岩川轻笑了一声，他随手把那捧玫瑰扔在旁边的垃圾桶上。你为了气我，他从西装内袋里",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 83,
+        "segments_total": 83,
+        "avg_similarity": 0.8945,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "里面是一枚粉钻戒指。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.506,
+        "segments_matched": 42,
+        "segments_total": 83,
+        "avg_similarity": 0.7265,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我老公在医院等我产检，别挡道。",
+        "episode": ""
+      },
+      "coverage_delta": -0.494,
+      "matched_delta": -41
+    },
+    {
+      "id": 28,
+      "blogger_name": "花开富贵58590",
+      "title": "时光不渡傅先生 被他的九辆黑色迈巴赫",
+      "asr_chars": 1717,
+      "asr_preview": "一辆黑色迈巴赫堵得严严实实无人机在半空中拉着巨大横幅，上面写着我的名字，周围下班",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9907,
+        "segments_matched": 107,
+        "segments_total": 108,
+        "avg_similarity": 0.874,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他当时是怎么说的？",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.463,
+        "segments_matched": 50,
+        "segments_total": 108,
+        "avg_similarity": 0.72,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5277,
+      "matched_delta": -57
+    },
+    {
+      "id": 29,
+      "blogger_name": "花开富贵58590",
+      "title": "时光不渡傅先生",
+      "asr_chars": 1678,
+      "asr_preview": "一辆黑色迈巴赫堵得严严实实无人机在半空中拉着巨大横幅，上面写着我的名字，周围下班",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9829,
+        "segments_matched": 115,
+        "segments_total": 117,
+        "avg_similarity": 0.8897,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他看着我，眼神里透着包容的宠溺。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4188,
+        "segments_matched": 49,
+        "segments_total": 117,
+        "avg_similarity": 0.7239,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5641,
+      "matched_delta": -66
+    },
+    {
+      "id": 30,
+      "blogger_name": "花开富贵58590",
+      "title": "时光不渡傅先生",
+      "asr_chars": 1559,
+      "asr_preview": "光漫不经心的扫过我微微隆起的腹部，他语气笃定带着一贯的高高在上。找人带着硅胶假肚",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.99,
+        "segments_matched": 99,
+        "segments_total": 100,
+        "avg_similarity": 0.8853,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "里面是一枚粉钻戒指。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.45,
+        "segments_matched": 45,
+        "segments_total": 100,
+        "avg_similarity": 0.747,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "脱下来吧，你不热吗？",
+        "episode": ""
+      },
+      "coverage_delta": -0.54,
+      "matched_delta": -54
+    },
+    {
+      "id": 31,
+      "blogger_name": "花开富贵58590",
+      "title": "时光不渡傅先生",
+      "asr_chars": 1636,
+      "asr_preview": "都目光漫不经心的扫过我微微隆起的腹部，他语气笃定带着一贯的高高在上。找人带着硅胶",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9802,
+        "segments_matched": 99,
+        "segments_total": 101,
+        "avg_similarity": 0.8829,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他当时是怎么说的？",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.505,
+        "segments_matched": 51,
+        "segments_total": 101,
+        "avg_similarity": 0.729,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4752,
+      "matched_delta": -48
+    },
+    {
+      "id": 32,
+      "blogger_name": "外今信息",
+      "title": "高能精彩看完直呼绝了 时光不再彼得先生",
+      "asr_chars": 1540,
+      "asr_preview": "手把那桶玫瑰扔在旁边的垃圾桶上。你为了气我连这种谎都编得出，他从西装内袋里拿出一",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 101,
+        "segments_total": 101,
+        "avg_similarity": 0.9013,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他甚至没有单膝下跪，只是把盒子递过来。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5149,
+        "segments_matched": 52,
+        "segments_total": 101,
+        "avg_similarity": 0.7449,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "脱下来吧，你不热吗？",
+        "episode": ""
+      },
+      "coverage_delta": -0.4851,
+      "matched_delta": -49
+    },
+    {
+      "id": 33,
+      "blogger_name": "外今信息",
+      "title": "熬夜刷完，上头又值得《渡傅先生》",
+      "asr_chars": 1476,
+      "asr_preview": "他的名字我等他是礼服，等到凌晨2点换来的，只是他一句没空，我以为订婚是幸福的开始",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9307,
+        "segments_matched": 94,
+        "segments_total": 101,
+        "avg_similarity": 0.9056,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "护士把单子递给我。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.396,
+        "segments_matched": 40,
+        "segments_total": 101,
+        "avg_similarity": 0.7787,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "这是我的个人隐私，与你无关。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5347,
+      "matched_delta": -54
+    },
+    {
+      "id": 34,
+      "blogger_name": "外今信息",
+      "title": "全程无槽点，看得人舒心惬意先生》",
+      "asr_chars": 1396,
+      "asr_preview": "会发紧，我疼的倒吸了一口凉气，冷汗瞬间从额头上冒出来。我扶着座椅慢慢滑坐在地上，",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.8913,
+        "segments_matched": 82,
+        "segments_total": 92,
+        "avg_similarity": 0.8694,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他没有第一时间来扶我。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.25,
+        "segments_matched": 23,
+        "segments_total": 92,
+        "avg_similarity": 0.6595,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "孕妇有先兆流产的迹象！",
+        "episode": ""
+      },
+      "coverage_delta": -0.6413,
+      "matched_delta": -59
+    },
+    {
+      "id": 35,
+      "blogger_name": "外今信息",
+      "title": "真实扎心，看完狠狠共情落泪",
+      "asr_chars": 1372,
+      "asr_preview": "上留下一个黑色的泥印，他当时是怎么说的，他说我大度让我乖乖在家等他，那天晚上我一",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9895,
+        "segments_matched": 94,
+        "segments_total": 95,
+        "avg_similarity": 0.9084,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他当时是怎么说的？",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4737,
+        "segments_matched": 45,
+        "segments_total": 95,
+        "avg_similarity": 0.7977,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "脱下来吧，你不热吗？",
+        "episode": ""
+      },
+      "coverage_delta": -0.5158,
+      "matched_delta": -49
+    },
+    {
+      "id": 36,
+      "blogger_name": "外今信息",
+      "title": "主角气场强，霸气模样太吸粉生》",
+      "asr_chars": 1366,
+      "asr_preview": "车队和钻戒高调的堵在我公司楼下求婚取消了吧。我来兑现承诺了，我连个眼神都没给护着",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9897,
+        "segments_matched": 96,
+        "segments_total": 97,
+        "avg_similarity": 0.8774,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我看着那束娇艳欲滴的玫瑰。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5052,
+        "segments_matched": 49,
+        "segments_total": 97,
+        "avg_similarity": 0.723,
+        "pinyin_score": 1.0,
+        "char_score": 0.9333,
+        "script_preview": "三年前订婚宴上差了你一个仪式，今天补给你。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4845,
+      "matched_delta": -47
+    },
+    {
+      "id": 37,
+      "blogger_name": "外今信息",
+      "title": "免费剧集:旧缘：... 全51集",
+      "asr_chars": 1600,
+      "asr_preview": "里面是一枚粉钻戒指，三年前订婚宴上差了你一个仪式。今天补给你，他甚至没有单膝下跪",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 105,
+        "segments_total": 105,
+        "avg_similarity": 0.8889,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "声音娇滴滴的，透过听筒传了出来。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5048,
+        "segments_matched": 53,
+        "segments_total": 105,
+        "avg_similarity": 0.7122,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4952,
+      "matched_delta": -52
+    },
+    {
+      "id": 38,
+      "blogger_name": "外今信息",
+      "title": "真实扎心，看完狠狠共情落泪",
+      "asr_chars": 1423,
+      "asr_preview": "是稳住了，没有大出血，胎儿心率也恢复了正常，医生看向陆景深，陆先生你太太受了惊吓",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 94,
+        "segments_total": 94,
+        "avg_similarity": 0.9059,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "医生看向陆景深。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.6702,
+        "segments_matched": 63,
+        "segments_total": 94,
+        "avg_similarity": 0.7422,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我出双倍，马上滚。",
+        "episode": ""
+      },
+      "coverage_delta": -0.3298,
+      "matched_delta": -31
+    },
+    {
+      "id": 39,
+      "blogger_name": "外今信息",
+      "title": "质感拉满，高级感十足超吸睛生》",
+      "asr_chars": 1340,
+      "asr_preview": "他顿了顿语气放缓了一些，你所谓的老公连产检都能迟到，他真能比我更了解你，他甚至还",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9888,
+        "segments_matched": 88,
+        "segments_total": 89,
+        "avg_similarity": 0.9101,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他顿了顿，语气放缓了一些。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4831,
+        "segments_matched": 43,
+        "segments_total": 89,
+        "avg_similarity": 0.7139,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "这是我的个人隐私，与你无关。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5057,
+      "matched_delta": -45
+    },
+    {
+      "id": 40,
+      "blogger_name": "外今信息",
+      "title": "不看会后悔，赶紧去刷全集吧《生》",
+      "asr_chars": 1174,
+      "asr_preview": "请你放尊重点，我冷冷的看着他，这是我的个人隐私，与你无关，傅延川的手僵在半空，手",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 81,
+        "segments_total": 81,
+        "avg_similarity": 0.8934,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我冷冷的看着他。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4691,
+        "segments_matched": 38,
+        "segments_total": 81,
+        "avg_similarity": 0.7089,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我倒要看看，这个连面都不敢露的缩头乌龟，到底是个什么货色。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5309,
+      "matched_delta": -43
+    },
+    {
+      "id": 41,
+      "blogger_name": "外今信息",
+      "title": "有笑有泪有温暖，看完超治愈先生",
+      "asr_chars": 1475,
+      "asr_preview": "一眼就看到了我们快步走过来。延川哥哥林薇姐她把白玫瑰递到我面前，脸上带着天真无邪",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 97,
+        "segments_total": 97,
+        "avg_similarity": 0.9092,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "白玫瑰的花粉味直冲鼻腔。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.6082,
+        "segments_matched": 59,
+        "segments_total": 97,
+        "avg_similarity": 0.7591,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "连家属都不让我当了？",
+        "episode": ""
+      },
+      "coverage_delta": -0.3918,
+      "matched_delta": -38
+    },
+    {
+      "id": 42,
+      "blogger_name": "初遇小剧场520",
+      "title": "漫剧高能反转，越看越惊喜先生》",
+      "asr_chars": 1397,
+      "asr_preview": "语气放缓了，一些你所谓的老公连产检都能迟到，他真能比我更了解你吗？他甚至还记得我",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9889,
+        "segments_matched": 89,
+        "segments_total": 90,
+        "avg_similarity": 0.9101,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他甚至还记得我以前的习惯。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5,
+        "segments_matched": 45,
+        "segments_total": 90,
+        "avg_similarity": 0.7267,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "这是我的个人隐私，与你无关。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4889,
+      "matched_delta": -44
+    },
+    {
+      "id": 43,
+      "blogger_name": "初遇小剧场520",
+      "title": "漫剧超有料，越看越有味道先生》",
+      "asr_chars": 1541,
+      "asr_preview": "的名字我等他是礼服，等到凌晨2点换来的只是他一句没空，我以为订婚是幸福的开始，结",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9714,
+        "segments_matched": 102,
+        "segments_total": 105,
+        "avg_similarity": 0.8639,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "护士把单子递给我。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4286,
+        "segments_matched": 45,
+        "segments_total": 105,
+        "avg_similarity": 0.744,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "这是我的个人隐私，与你无关。",
+        "episode": ""
+      },
+      "coverage_delta": -0.5428,
+      "matched_delta": -57
+    },
+    {
+      "id": 44,
+      "blogger_name": "初遇小剧场520",
+      "title": "时光不渡傅先生，漫剧精彩绝伦，不看太可惜",
+      "asr_chars": 985,
+      "asr_preview": "就在这时，他的手机响了专属的微信提示音，至今没顾全的声音。。拉开车门我护着肚子坐",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9828,
+        "segments_matched": 57,
+        "segments_total": 58,
+        "avg_similarity": 0.8925,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "刚坐稳，电梯门再次打开。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5,
+        "segments_matched": 29,
+        "segments_total": 58,
+        "avg_similarity": 0.7729,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4828,
+      "matched_delta": -28
+    },
+    {
+      "id": 45,
+      "blogger_name": "初遇小剧场520",
+      "title": "漫剧氛围感十足，越看越喜欢",
+      "asr_chars": 1311,
+      "asr_preview": "我没在闹脾气，我已经结婚了，怀孕5个月，付延川轻笑了一声，他随手把那捧玫瑰扔在旁",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 1.0,
+        "segments_matched": 91,
+        "segments_total": 91,
+        "avg_similarity": 0.8912,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "他伸手想拉我的手腕。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.5714,
+        "segments_matched": 52,
+        "segments_total": 91,
+        "avg_similarity": 0.746,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我只是太替你高兴了。",
+        "episode": ""
+      },
+      "coverage_delta": -0.4286,
+      "matched_delta": -39
+    },
+    {
+      "id": 46,
+      "blogger_name": "初遇小剧场520",
+      "title": "超全后续 漫剧剧情超赞，越追越上头",
+      "asr_chars": 1429,
+      "asr_preview": "觉得有些反胃，这是孕期的正常反应，但在这个男人面前加重了我的不适，我深吸了一口气",
+      "A_raw": {
+        "status": "matched",
+        "coverage": 0.9899,
+        "segments_matched": 98,
+        "segments_total": 99,
+        "avg_similarity": 0.893,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "我深吸了一口气，压下胸口的恶心感。",
+        "episode": ""
+      },
+      "B_cleaned": {
+        "status": "matched",
+        "coverage": 0.4646,
+        "segments_matched": 46,
+        "segments_total": 99,
+        "avg_similarity": 0.7345,
+        "pinyin_score": 1.0,
+        "char_score": 1.0,
+        "script_preview": "脱下来吧，你不热吗？",
+        "episode": ""
+      },
+      "coverage_delta": -0.5253,
+      "matched_delta": -52
+    }
+  ]
+}

@@ -347,12 +347,20 @@ async def create_task_from_pool(
     batch_name = first_batch.name if first_batch else "(批次导入)"
     keyword = body.keyword or batch_name
 
-    # 关联工单时仅校验工单存在（不再拦截缺台词；无台词时二阶段跳过比对，可后补一键比对）
-    if body.work_order_id:
+    # 关联工单：显式传入，或从 keyword/批次名 WO-{order_no} 反查
+    work_order_id = body.work_order_id
+    if not work_order_id:
+        from api.work_orders import resolve_work_order_id_from_keyword
+
+        work_order_id = await resolve_work_order_id_from_keyword(db, keyword)
+        if not work_order_id and first_batch:
+            work_order_id = await resolve_work_order_id_from_keyword(db, first_batch.name or "")
+
+    if work_order_id:
         from models import WorkOrder
-        wo = await db.get(WorkOrder, body.work_order_id)
+        wo = await db.get(WorkOrder, work_order_id)
         if not wo:
-            raise HTTPException(404, f"工单 #{body.work_order_id} 不存在")
+            raise HTTPException(404, f"工单 #{work_order_id} 不存在")
         if wo.drama_name:
             keyword = wo.drama_name
 
@@ -367,7 +375,7 @@ async def create_task_from_pool(
         collect_mode="link_first",
         phase=2,
         status="links_collected",
-        work_order_id=body.work_order_id,
+        work_order_id=work_order_id,
         created_at=datetime.now(),
     )
     db.add(task)

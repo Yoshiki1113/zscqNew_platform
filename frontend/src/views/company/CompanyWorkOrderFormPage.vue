@@ -18,7 +18,7 @@
           <div class="hero-copy">
             <p class="eyebrow">WORK ORDER</p>
             <h2 class="hero-title">上传工单包</h2>
-            <p class="hero-desc">按规范打包 zip，系统将为每部剧创建已提交工单；台词可后补，取证认领后自动清洗。</p>
+            <p class="hero-desc">按规范打包 zip，系统将为每部剧创建已提交工单；台词可后补，上传即按关键词装库可供比对，可选「清洗」保留旁白+对白。</p>
             <div class="hero-steps">
               <span>1. Excel 剧名</span>
               <i></i>
@@ -46,7 +46,7 @@
             <li>新建一个文件夹（例如「工单包」）。</li>
             <li>放入 Excel：每行一部<strong>剧名</strong>（列名建议为「剧名」）。</li>
             <li>同目录放置台词 <strong>doc / docx</strong>（可缺；缺的仍建单，二阶段前需补齐）。</li>
-            <li>打包为 zip 后在右侧上传（上传时不清洗；取证端认领后再清洗）。</li>
+            <li>打包为 zip 后在右侧上传（上传即装原文库；需要时在工单详情点「清洗」）。</li>
           </ol>
           <pre class="tree">工单包/
   剧名列表.xlsx
@@ -80,7 +80,7 @@
                 <router-link :to="`/company/work-orders/${c.id}`">{{ c.order_no }}</router-link>
                 — {{ c.drama_name }}
                 <span v-if="c.script_status === 'ready'">（台词已就绪）</span>
-                <span v-else-if="c.script_status === 'pending'">（台词待认领后清洗）</span>
+                <span v-else-if="c.script_status === 'pending'">（台词待装库）</span>
                 <span v-else-if="c.has_script_file === false || c.script_status === 'none'">（缺台词文件）</span>
               </li>
             </ul>
@@ -88,7 +88,7 @@
               缺台词文件（已建单，可后补）：{{ result.missing_script.join('、') }}
             </p>
             <p v-if="result.script_pending?.length" class="warn">
-              待清洗：{{ result.script_pending.join('、') }}
+              待装库：{{ result.script_pending.join('、') }}
             </p>
             <p v-if="result.unused_docx?.length" class="warn">
               zip 内未匹配的剧本文件：{{ result.unused_docx.join('、') }}

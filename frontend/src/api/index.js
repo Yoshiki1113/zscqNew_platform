@@ -56,8 +56,20 @@ export const evidenceApi = {
     // 可能含补转写，批量讯飞耗时长
     return request.post('/evidence/rematch-scripts', data, { timeout: 1800000 })
   },
+  rematchCandidates(data = {}) {
+    return request.post('/evidence/rematch-scripts/candidates', data)
+  },
+  rematchOne(id) {
+    return request.post(`/evidence/${id}/rematch-script`, null, { timeout: 600000 })
+  },
+  batchAsrCandidates(data = {}) {
+    return request.post('/evidence/batch-asr/candidates', data)
+  },
   batchAsr(data = {}) {
     return request.post('/evidence/batch-asr', data, { timeout: 1800000 })
+  },
+  asrOne(id) {
+    return request.post(`/evidence/${id}/asr`, null, { timeout: 600000 })
   },
   push(ids, pushedBy = '取证员') {
     return request.post('/evidence/push', { ids, pushed_by: pushedBy })
@@ -81,6 +93,7 @@ export const workOrderApi = {
   update(id, data) { return request.patch(`/work-orders/${id}`, data) },
   submit(id) { return request.post(`/work-orders/${id}/submit`) },
   assign(id, assignedTo) { return request.post(`/work-orders/${id}/assign`, { assigned_to: assignedTo }) },
+  cleanScript(id) { return request.post(`/work-orders/${id}/clean-script`, {}, { timeout: 600000 }) },
   importLinks(id, links = []) { return request.post(`/work-orders/${id}/import-links`, { links }) },
   linkPool(id) { return request.get(`/work-orders/${id}/link-pool`) },
   uploadAttachment(id, file, fileType = 'other') {
@@ -128,6 +141,9 @@ export const reviewApi = {
   pool(params = {}) { return request.get('/reviews/pool', { params }) },
   update(id, data) { return request.put(`/reviews/${id}`, data) },
   batch(data) { return request.post('/reviews/batch', data) },
+  peers(evidenceId, status) {
+    return request.get('/reviews/peers', { params: { evidence_id: evidenceId, status } })
+  },
 }
 
 /** 博主聚合 */

@@ -9,7 +9,7 @@
           </div>
           <p class="page-subtitle">{{ record.blogger_name || '' }} {{ formatDateTime(record.capture_timestamp) }}</p>
         </div>
-        <el-button size="small" @click="$router.back()">
+        <el-button size="small" @click="goBack">
           <el-icon style="margin-right:2px"><ArrowLeft /></el-icon>返回
         </el-button>
       </div>
@@ -407,8 +407,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, CircleCloseFilled, CircleCheckFilled, RefreshLeft, Check,
   InfoFilled, VideoPlay, DataLine, User, Connection, Microphone, Picture, Document
@@ -419,6 +419,7 @@ import { useAuthStore } from '@/stores/auth'
 import axios from 'axios'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const readonly = computed(() => !!route.meta.readonly)
 const companyReview = computed(() => !!route.meta.companyReview)
@@ -429,6 +430,19 @@ const pushing = ref(false)
 const pushingCompany = ref(false)
 const reviewNotes = ref('')
 const jsonContent = ref('')
+
+function goBack() {
+  const tid = record.value.task_id || Number(route.query.task_id) || 0
+  if (companyReview.value) {
+    router.push('/company/review-pool')
+    return
+  }
+  if (readonly.value) {
+    router.back()
+    return
+  }
+  router.push(tid ? { path: '/collector/evidence', query: { task_id: String(tid) } } : '/collector/evidence')
+}
 
 const canPushPolice = computed(() =>
   record.value.pushed_to_company &&
@@ -530,11 +544,37 @@ async function fetchDetail() {
 async function doReview(status) {
   reviewing.value = true
   try {
-    await reviewApi.update(parseInt(route.params.id)||0, { review_status: status, review_notes: reviewNotes.value })
-    record.value.review_status = status; record.value.review_notes = reviewNotes.value
+    const { data } = await reviewApi.update(parseInt(route.params.id) || 0, {
+      review_status: status,
+      review_notes: reviewNotes.value,
+    })
+    record.value.review_status = status
+    record.value.review_notes = reviewNotes.value
     ElMessage.success(`已标注: ${status}`)
-  } catch (e) { ElMessage.error(e.response?.data?.detail || '标注失败') }
-  finally { reviewing.value = false }
+    const peerIds = data?.peer_ids || []
+    const n = data?.peer_count || peerIds.length
+    if (companyReview.value && n > 0 && status) {
+      try {
+        await ElMessageBox.confirm(
+          `检测到该博主在同剧下还有 ${n} 条证据未标记为「${status}」，是否一键同步？`,
+          '一键同步标记',
+          { confirmButtonText: '一键标记', cancelButtonText: '仅本条', type: 'warning' },
+        )
+        await reviewApi.batch({
+          evidence_ids: peerIds,
+          review_status: status,
+          review_notes: reviewNotes.value,
+        })
+        ElMessage.success(`已同步标记 ${peerIds.length} 条`)
+      } catch {
+        /* 用户取消 */
+      }
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '标注失败')
+  } finally {
+    reviewing.value = false
+  }
 }
 
 async function pushToCompany() {

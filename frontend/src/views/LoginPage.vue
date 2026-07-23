@@ -7,7 +7,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
         <h1>嘉剧荟</h1>
-        <p>短剧侵权识别与取证平台</p>
+        <p>嘉剧荟版权保护智能侦测平台</p>
       </div>
 
       <div class="role-grid">

@@ -39,6 +39,7 @@ def _record_to_list_item(r: EvidenceRecord) -> dict:
     return {
         "id": r.id,
         "task_id": r.task_id,
+        "search_keyword": r.search_keyword or "",
         "blogger_name": r.blogger_name or "",
         "video_channel_id": r.video_channel_id or "",
         "title": r.title or "",
@@ -261,17 +262,9 @@ async def rematch_scripts(
     db: AsyncSession = Depends(get_db),
 ):
     """一键补台词比对：无 ASR 先转写再比对；有 ASR 则直接按剧名比对。"""
-    from engine.script_rematch import REMATCH_STATUSES, rematch_evidence_rows
+    from engine.script_rematch import rematch_evidence_rows
 
-    q = select(EvidenceRecord).where(
-        or_(
-            EvidenceRecord.script_match_status.in_(list(REMATCH_STATUSES)),
-            EvidenceRecord.script_match_status.is_(None),
-        ),
-        _has_media_or_asr_clause(),
-    )
-    q = _apply_evidence_scope_filters(q, body)
-
+    q = _pending_rematch_query(body)
     rows = list((await db.execute(q.order_by(EvidenceRecord.id.asc()))).scalars().all())
     if not rows:
         return {
@@ -305,6 +298,35 @@ async def rematch_scripts(
         parts.append(f"异常 {summary['error']}")
     summary["message"] = "补比对完成：" + "，".join(parts)
     return summary
+
+
+def _pending_rematch_query(body: RematchScriptsRequest):
+    from engine.script_rematch import REMATCH_STATUSES
+
+    q = select(EvidenceRecord).where(
+        or_(
+            EvidenceRecord.script_match_status.in_(list(REMATCH_STATUSES)),
+            EvidenceRecord.script_match_status.is_(None),
+        ),
+        _has_media_or_asr_clause(),
+    )
+    return _apply_evidence_scope_filters(q, body)
+
+
+@router.post("/evidence/rematch-scripts/candidates")
+async def rematch_scripts_candidates(
+    body: RematchScriptsRequest = RematchScriptsRequest(),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回待台词比对的证据 id 列表（不跑比对），供前端逐条进度调用。"""
+    q = _pending_rematch_query(body)
+    rows = list((await db.execute(q.order_by(EvidenceRecord.id.asc()))).scalars().all())
+    ids = [r.id for r in rows]
+    return {
+        "total": len(ids),
+        "ids": ids,
+        "message": f"待比对 {len(ids)} 条" if ids else "没有需要补比对的证据",
+    }
 
 
 @router.post("/evidence/batch-asr")
@@ -354,6 +376,108 @@ async def batch_asr(
         parts.append(f"异常 {summary['error']}")
     summary["message"] = "ASR 转写完成：" + "，".join(parts)
     return summary
+
+
+def _pending_asr_query(body: RematchScriptsRequest):
+    q = select(EvidenceRecord).where(
+        or_(EvidenceRecord.asr_text.is_(None), EvidenceRecord.asr_text == ""),
+        or_(
+            and_(
+                EvidenceRecord.recording_audio_path.is_not(None),
+                EvidenceRecord.recording_audio_path != "",
+            ),
+            and_(
+                EvidenceRecord.recording_video_path.is_not(None),
+                EvidenceRecord.recording_video_path != "",
+            ),
+        ),
+    )
+    return _apply_evidence_scope_filters(q, body)
+
+
+@router.post("/evidence/batch-asr/candidates")
+async def batch_asr_candidates(
+    body: RematchScriptsRequest = RematchScriptsRequest(),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回待 ASR 的证据 id 列表（不跑转写），供前端逐条进度调用。"""
+    q = _pending_asr_query(body)
+    rows = list((await db.execute(q.order_by(EvidenceRecord.id.asc()))).scalars().all())
+    ids = [r.id for r in rows]
+    return {
+        "total": len(ids),
+        "ids": ids,
+        "message": f"待转写 {len(ids)} 条" if ids else "没有需要转写的证据",
+    }
+
+
+@router.post("/evidence/{evidence_id}/asr")
+async def asr_one_evidence(evidence_id: int, db: AsyncSession = Depends(get_db)):
+    """单条证据 ASR 转写（无比对）。"""
+    from engine.script_rematch import transcribe_evidence_row
+
+    row = (await db.execute(
+        select(EvidenceRecord).where(EvidenceRecord.id == evidence_id)
+    )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "证据不存在")
+
+    if (row.asr_text or "").strip():
+        return {
+            "ok": True,
+            "skipped": True,
+            "evidence_id": evidence_id,
+            "message": "已有 ASR，跳过",
+        }
+
+    text = await asyncio.to_thread(transcribe_evidence_row, row)
+    if not text:
+        await db.commit()  # 可能写了 recording_audio_path
+        return {
+            "ok": False,
+            "skipped": False,
+            "evidence_id": evidence_id,
+            "message": "转写失败或无可用媒体",
+        }
+    await db.commit()
+    return {
+        "ok": True,
+        "skipped": False,
+        "evidence_id": evidence_id,
+        "asr_len": len(text),
+        "message": "转写成功",
+    }
+
+
+@router.post("/evidence/{evidence_id}/rematch-script")
+async def rematch_one_evidence(evidence_id: int, db: AsyncSession = Depends(get_db)):
+    """单条证据台词比对（无 ASR 时会先补转写）。"""
+    from engine.script_rematch import rematch_evidence_rows
+
+    row = (await db.execute(
+        select(EvidenceRecord).where(EvidenceRecord.id == evidence_id)
+    )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "证据不存在")
+
+    summary = await asyncio.to_thread(rematch_evidence_rows, [row])
+    await db.commit()
+    await db.refresh(row)
+
+    st = (row.script_match_status or "").strip()
+    failed = bool(
+        summary.get("skipped_no_asr")
+        or summary.get("skipped_no_keyword")
+        or summary.get("error")
+    )
+    return {
+        "ok": not failed,
+        "evidence_id": evidence_id,
+        "script_match_status": st,
+        "script_match_similarity": float(row.script_match_similarity or 0),
+        "summary": summary,
+        "message": f"比对完成: {st or 'unknown'}",
+    }
 
 
 @router.get("/evidence/{evidence_id}")
@@ -412,8 +536,11 @@ async def push_all_evidence_to_company(
         r.pushed_to_company_by = body.pushed_by
         updated += 1
         task = (await db.execute(select(Task).where(Task.id == r.task_id))).scalar_one_or_none()
-        if task and task.work_order_id:
-            work_order_ids.add(task.work_order_id)
+        if task:
+            from api.work_orders import ensure_task_work_order_id
+            woid = await ensure_task_work_order_id(db, task)
+            if woid:
+                work_order_ids.add(woid)
 
     await db.commit()
     from api.work_orders import _refresh_work_order_stats
@@ -454,8 +581,10 @@ async def push_evidence_to_company(body: PushEvidenceRequest, db: AsyncSession =
         r.pushed_to_company_at = now
         r.pushed_to_company_by = body.pushed_by
         updated += 1
-        if task.work_order_id:
-            work_order_ids.add(task.work_order_id)
+        from api.work_orders import ensure_task_work_order_id
+        woid = await ensure_task_work_order_id(db, task)
+        if woid:
+            work_order_ids.add(woid)
 
     if updated == 0 and skipped > 0:
         raise HTTPException(400, "仅二阶段任务产出的证据可推送公司核查池")

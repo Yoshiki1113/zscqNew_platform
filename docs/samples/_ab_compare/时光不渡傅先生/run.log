@@ -1,0 +1,95 @@
+﻿1) copy raw
+   raw -> D:\code\zscqNew_platform\docs\samples\_ab_compare\鏃跺厜涓嶆浮鍌呭厛鐢焅raw.txt
+2) clean
+   mode=llm meta={'mode': 'llm', 'raw_chars': 11491, 'raw_lines': 614, 'cleaned_chars': 3459, 'cleaned_lines': 197}
+   cleaned -> D:\code\zscqNew_platform\docs\samples\_ab_compare\鏃跺厜涓嶆浮鍌呭厛鐢焅cleaned.txt
+3) load ASR from DB
+   counts={'total': 191, 'with_asr': 187, 'with_media': 191} loaded=20
+4) A/B match
+[1/20] id=27 asr_chars=1393
+[2/20] id=28 asr_chars=1717
+[3/20] id=29 asr_chars=1678
+[4/20] id=30 asr_chars=1559
+[5/20] id=31 asr_chars=1636
+[6/20] id=32 asr_chars=1540
+[7/20] id=33 asr_chars=1476
+[8/20] id=34 asr_chars=1396
+[9/20] id=35 asr_chars=1372
+[10/20] id=36 asr_chars=1366
+[11/20] id=37 asr_chars=1600
+[12/20] id=38 asr_chars=1423
+[13/20] id=39 asr_chars=1340
+[14/20] id=40 asr_chars=1174
+[15/20] id=41 asr_chars=1475
+[16/20] id=42 asr_chars=1397
+[17/20] id=43 asr_chars=1541
+[18/20] id=44 asr_chars=985
+[19/20] id=45 asr_chars=1311
+[20/20] id=46 asr_chars=1429
+5) report -> D:\code\zscqNew_platform\docs\samples\_ab_compare\鏃跺厜涓嶆浮鍌呭厛鐢焅report.md
+# 鏃跺厜涓嶆浮鍌呭厛鐢?鏈竻娲?vs 娓呮礂鍚?姣斿鎶ュ憡
+
+## 娓呮礂鎽樿
+
+- mode: `llm`
+- 鍘熸枃: 11491 瀛?/ 614 闈炵┖琛?
+- 娓呮礂鍚? 3459 瀛?/ 197 闈炵┖琛?
+
+## 璇佹嵁鏍锋湰
+
+- 璇ュ墽璇佹嵁鎬绘暟: 191锛涙湁 ASR: 187锛涙湁濯掍綋: 191锛涙湰娆℃瘮瀵? 20 鏉?
+
+## 姹囨€?
+
+- A 鏈竻娲?matched: 20/20锛屽钩鍧?coverage: 0.983
+- B 宸叉竻娲?matched: 20/20锛屽钩鍧?coverage: 0.484
+- coverage 骞冲潎鎻愬崌: -0.499
+
+## 閫愭潯缁撴灉
+
+| id | blogger | A status | A cov | A seg | B status | B cov | B seg | 螖cov |
+|---:|---|---|---:|---|---|---:|---|---:|
+| 27 | 鑺卞紑瀵岃吹58590 | matched | 1.00 | 83/83 | matched | 0.51 | 42/83 | -0.49 |
+| 28 | 鑺卞紑瀵岃吹58590 | matched | 0.99 | 107/108 | matched | 0.46 | 50/108 | -0.53 |
+| 29 | 鑺卞紑瀵岃吹58590 | matched | 0.98 | 115/117 | matched | 0.42 | 49/117 | -0.56 |
+| 30 | 鑺卞紑瀵岃吹58590 | matched | 0.99 | 99/100 | matched | 0.45 | 45/100 | -0.54 |
+| 31 | 鑺卞紑瀵岃吹58590 | matched | 0.98 | 99/101 | matched | 0.51 | 51/101 | -0.48 |
+| 32 | 澶栦粖淇℃伅 | matched | 1.00 | 101/101 | matched | 0.51 | 52/101 | -0.49 |
+| 33 | 澶栦粖淇℃伅 | matched | 0.93 | 94/101 | matched | 0.40 | 40/101 | -0.53 |
+| 34 | 澶栦粖淇℃伅 | matched | 0.89 | 82/92 | matched | 0.25 | 23/92 | -0.64 |
+| 35 | 澶栦粖淇℃伅 | matched | 0.99 | 94/95 | matched | 0.47 | 45/95 | -0.52 |
+| 36 | 澶栦粖淇℃伅 | matched | 0.99 | 96/97 | matched | 0.51 | 49/97 | -0.48 |
+| 37 | 澶栦粖淇℃伅 | matched | 1.00 | 105/105 | matched | 0.50 | 53/105 | -0.50 |
+| 38 | 澶栦粖淇℃伅 | matched | 1.00 | 94/94 | matched | 0.67 | 63/94 | -0.33 |
+| 39 | 澶栦粖淇℃伅 | matched | 0.99 | 88/89 | matched | 0.48 | 43/89 | -0.51 |
+| 40 | 澶栦粖淇℃伅 | matched | 1.00 | 81/81 | matched | 0.47 | 38/81 | -0.53 |
+| 41 | 澶栦粖淇℃伅 | matched | 1.00 | 97/97 | matched | 0.61 | 59/97 | -0.39 |
+| 42 | 鍒濋亣灏忓墽鍦?20 | matched | 0.99 | 89/90 | matched | 0.50 | 45/90 | -0.49 |
+| 43 | 鍒濋亣灏忓墽鍦?20 | matched | 0.97 | 102/105 | matched | 0.43 | 45/105 | -0.54 |
+| 44 | 鍒濋亣灏忓墽鍦?20 | matched | 0.98 | 57/58 | matched | 0.50 | 29/58 | -0.48 |
+| 45 | 鍒濋亣灏忓墽鍦?20 | matched | 1.00 | 91/91 | matched | 0.57 | 52/91 | -0.43 |
+| 46 | 鍒濋亣灏忓墽鍦?20 | matched | 0.99 | 98/99 | matched | 0.46 | 46/99 | -0.53 |
+
+## 娓呮礂鍚庡彉濂斤紙coverage 鎻愬崌鏈€澶氾級
+
+
+## 娓呮礂鍚庡彉宸垨鎸佸钩锛坈overage 鏈€浣庯級
+
+- id=34 螖cov=-0.64 A=0.89鈫払=0.25 asr=`浼氬彂绱э紝鎴戠柤鐨勫€掑惛浜嗕竴鍙ｅ噳姘旓紝鍐锋睏鐬棿浠庨澶翠笂鍐掑嚭鏉ャ€傛垜鎵剁潃搴ф鎱㈡參婊戝潗鍦ㄥ湴涓婏紝`
+- id=29 螖cov=-0.56 A=0.98鈫払=0.42 asr=`涓€杈嗛粦鑹茶繄宸磋但鍫靛緱涓ヤ弗瀹炲疄鏃犱汉鏈哄湪鍗婄┖涓媺鐫€宸ㄥぇ妯箙锛屼笂闈㈠啓鐫€鎴戠殑鍚嶅瓧锛屽懆鍥翠笅鐝璥
+- id=43 螖cov=-0.54 A=0.97鈫払=0.43 asr=`鐨勫悕瀛楁垜绛変粬鏄ぜ鏈嶏紝绛夊埌鍑屾櫒2鐐规崲鏉ョ殑鍙槸浠栦竴鍙ユ病绌猴紝鎴戜互涓鸿濠氭槸骞哥鐨勫紑濮嬶紝缁揱
+
+python.exe : Exception ignored in: <function Connection.__del__ at 0x0000019E88376840>
+所在位置 C:\Users\sp\AppData\Local\Temp\ps-script-276356b2-180c-44f6-8d08-c2ce20ef0b94.ps1:100 字符: 53
++ ... ONUTF8='1'; & 'C:\Users\sp\anaconda3\envs\zscq\python.exe' scripts/ab ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Exception ignor...00019E88376840>:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Traceback (most recent call last):
+  File "C:\Users\sp\anaconda3\envs\zscq\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+  File "C:\Users\sp\anaconda3\envs\zscq\Lib\site-packages\aiomysql\connection.py", line 339, in close
+  File "C:\Users\sp\anaconda3\envs\zscq\Lib\asyncio\proactor_events.py", line 109, in close
+  File "C:\Users\sp\anaconda3\envs\zscq\Lib\asyncio\base_events.py", line 762, in call_soon
+  File "C:\Users\sp\anaconda3\envs\zscq\Lib\asyncio\base_events.py", line 520, in _check_closed
+RuntimeError: Event loop is closed

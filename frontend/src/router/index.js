@@ -23,7 +23,7 @@ const routes = [
     component: () => import('@/layouts/PoliceLayout.vue'),
     meta: { role: 'police' },
     children: [
-      { path: '', name: 'PoliceDashboard', component: () => import('@/views/police/PoliceDashboard.vue'), meta: { title: '驾驶舱' } },
+      { path: '', name: 'PoliceDashboard', component: () => import('@/views/police/PoliceDashboard.vue'), meta: { title: '嘉剧荟版权保护智能侦测平台' } },
       { path: 'clues', name: 'PoliceClues', component: () => import('@/views/police/PoliceCluesPage.vue'), meta: { title: '线索列表' } },
       {
         path: 'evidence/:id',
@@ -126,6 +126,11 @@ router.beforeEach((to, from, next) => {
   }
 
   next()
+})
+
+const APP_TITLE = '嘉剧荟版权保护智能侦测平台'
+router.afterEach(() => {
+  document.title = APP_TITLE
 })
 
 export default router

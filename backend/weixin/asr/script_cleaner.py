@@ -40,14 +40,14 @@ _RE_STAGE = re.compile(r"^▲")
 _RE_SPEAKER_PREFIX = re.compile(r"^[\u4e00-\u9fffA-Za-z·]{1,12}\s*[:：]\s*")
 
 
-SYSTEM_PROMPT = """你是短剧剧本清洗助手。任务：从剧本原文中只提取人物嘴里说的对白。
+SYSTEM_PROMPT = """你是短剧剧本清洗助手。任务：从剧本原文中提取「旁白/叙述」与「人物对白」。
 
 硬性规则：
-1. 只输出对白正文，一句话一行。
-2. 删除：角色名、`角色：`/`角色:` 前缀、集数/场次标题、出场人物、舞台指示、旁白说明、人物小传、场景描述。
-3. 保留语气词与省略号（如 ……、咳咳……）。
+1. 保留：人物对白；旁白/叙述句（含无引号的第三人称叙述、心理描写中可朗读的句子）。
+2. 删除：舞台指示（如 ▲、OS、画外）、出场人物列表、纯集数/场次/章节标题、人物小传、拍摄备注；去掉 `角色：`/`角色:` 前缀，只留台词正文。
+3. 一句话一行；保留语气词与省略号（如 ……、咳咳……）。
 4. 不要编号、不要 markdown、不要解释、不要空行。
-5. 若本段没有对白，输出空（什么都不写）。
+5. 若本段没有任何旁白或对白，输出空（什么都不写）。
 """
 
 
@@ -252,13 +252,15 @@ def _call_ark_text(prompt: str, user_content: str) -> Optional[str]:
 
 
 def _rule_fallback_clean(raw: str) -> str:
-    """规则兜底：尽量抽出「角色：台词」中的台词。"""
+    """规则兜底：保留旁白/叙述与对白，去掉标题与舞台指示。"""
     lines_out: list[str] = []
     for raw_line in raw.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         stripped = raw_line.strip()
         if not stripped:
             continue
         if _RE_EPISODE.match(stripped) or _RE_SCENE.match(stripped) or _RE_CHARS.match(stripped):
+            continue
+        if re.match(r"^第\d+章", stripped):
             continue
         if _RE_STAGE.match(stripped):
             continue
@@ -268,11 +270,18 @@ def _rule_fallback_clean(raw: str) -> str:
             if dialog:
                 lines_out.append(dialog)
             continue
-        # 丢弃过长说明体
-        if len(stripped) > 120 and "？" not in stripped and "！" not in stripped and "。" not in stripped[:40]:
+        # 去掉包裹引号的纯对白行
+        if (stripped.startswith("“") and stripped.endswith("”")) or (
+            stripped.startswith('"') and stripped.endswith('"')
+        ):
+            inner = stripped[1:-1].strip()
+            if inner:
+                lines_out.append(inner)
             continue
-        # 无冒号的短行也可能是对白
-        if 2 <= len(stripped) <= 80:
+        # 保留有标点的叙述/旁白；过长无标点的技术说明丢弃
+        if len(stripped) > 200 and "。" not in stripped and "？" not in stripped and "！" not in stripped:
+            continue
+        if len(stripped) >= 2:
             lines_out.append(stripped)
     return "\n".join(lines_out)
 
@@ -302,8 +311,8 @@ def _normalize_dialogue_lines(text: str) -> list[str]:
     return deduped
 
 
-def clean_script_to_dialogues(raw_text: str) -> tuple[str, str]:
-    """清洗剧本原文为纯对白。
+def clean_script_to_narration_and_dialogues(raw_text: str) -> tuple[str, str]:
+    """清洗剧本原文为旁白 + 对白。
 
     Returns:
         (cleaned_text, mode)  mode 为 llm | fallback | mixed
@@ -319,7 +328,7 @@ def clean_script_to_dialogues(raw_text: str) -> tuple[str, str]:
     for i, chunk in enumerate(chunks):
         user_msg = (
             f"请清洗以下剧本片段（第 {i + 1}/{len(chunks)} 块），"
-            f"只输出人物对白，一句话一行：\n\n{chunk}"
+            f"只输出旁白与人物对白，一句话一行：\n\n{chunk}"
         )
         llm_out = _call_ark_text(SYSTEM_PROMPT, user_msg)
         if llm_out and llm_out.strip():
@@ -333,7 +342,6 @@ def clean_script_to_dialogues(raw_text: str) -> tuple[str, str]:
     lines = _normalize_dialogue_lines(merged)
     text = "\n".join(lines)
     if not text.strip():
-        # 全失败再整篇规则兜底一次
         text = "\n".join(_normalize_dialogue_lines(_rule_fallback_clean(raw_text)))
         return text, "fallback"
 
@@ -346,6 +354,11 @@ def clean_script_to_dialogues(raw_text: str) -> tuple[str, str]:
     return text, mode
 
 
+def clean_script_to_dialogues(raw_text: str) -> tuple[str, str]:
+    """兼容旧名：现为旁白+对白清洗。"""
+    return clean_script_to_narration_and_dialogues(raw_text)
+
+
 def clean_script_file_bytes(data: bytes, filename: str = "") -> tuple[str, str, str]:
     """从文件字节抽原文并清洗。
 
@@ -353,5 +366,5 @@ def clean_script_file_bytes(data: bytes, filename: str = "") -> tuple[str, str, 
         (cleaned_text, mode, raw_preview_len_info)
     """
     raw = extract_script_bytes(data, filename)
-    cleaned, mode = clean_script_to_dialogues(raw)
+    cleaned, mode = clean_script_to_narration_and_dialogues(raw)
     return cleaned, mode, f"raw_chars={len(raw)}"

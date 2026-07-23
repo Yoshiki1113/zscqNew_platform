@@ -48,6 +48,31 @@
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span>台词库（关键词：{{ order.drama_name || '—' }}）</span>
+        <el-space>
+          <el-tag size="small" :type="scriptTag(order.script_status)">
+            {{ order.script_status_label || '缺台词' }}
+          </el-tag>
+          <el-tag v-if="order.library_mode_label" size="small" effect="plain">
+            {{ order.library_mode_label }}
+          </el-tag>
+          <el-button
+            size="small"
+            type="warning"
+            :loading="cleaning"
+            :disabled="!canClean"
+            @click="cleanScript"
+          >清洗</el-button>
+        </el-space>
+      </div>
+      <div class="card-body">
+        <p class="script-hint">上传即按关键词装原文可供比对；点「清洗」只保留旁白+对白。</p>
+        <p v-if="order.script_error" class="script-err">{{ order.script_error }}</p>
+      </div>
+    </div>
+
     <div class="card" v-if="attachments.length">
       <div class="card-header">附件</div>
       <div class="card-body">
@@ -61,7 +86,7 @@
     <div class="card">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span>核查池证据（取证推送后可复核）</span>
-        <router-link to="/company/review-pool">前往核查池 →</router-link>
+        <router-link to="/company/review-pool">返回核查池 →</router-link>
       </div>
       <div class="card-body" style="padding:0;">
         <ResultListPage
@@ -78,6 +103,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Document } from '@element-plus/icons-vue'
 import { workOrderApi } from '@/api/index'
 import { formatDateTimeShort } from '@/utils/time'
@@ -85,10 +111,20 @@ import ResultListPage from '@/views/ResultListPage.vue'
 
 const route = useRoute()
 const loading = ref(false)
+const cleaning = ref(false)
 const order = ref({})
 const attachments = ref([])
 const reviewStats = computed(() => order.value.review_stats || {})
 const linkPool = computed(() => order.value.link_pool || {})
+const canClean = computed(() => {
+  const s = order.value.script_status
+  return s === 'ready' || s === 'failed' || s === 'pending'
+})
+
+function scriptTag(s) {
+  const map = { ready: 'success', pending: 'warning', cleaning: 'warning', failed: 'danger', none: 'info' }
+  return map[s] || 'info'
+}
 
 async function fetchDetail() {
   loading.value = true
@@ -98,6 +134,19 @@ async function fetchDetail() {
     attachments.value = (data.attachments || []).map(a => ({ id: a.id, file_name: a.file_name, file_type: a.file_type }))
   } finally {
     loading.value = false
+  }
+}
+
+async function cleanScript() {
+  cleaning.value = true
+  try {
+    const { data } = await workOrderApi.cleanScript(order.value.id)
+    order.value = { ...order.value, ...data }
+    ElMessage.success(data.message || '清洗完成')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '清洗失败')
+  } finally {
+    cleaning.value = false
   }
 }
 
@@ -113,5 +162,7 @@ onMounted(fetchDetail)
 .info-grid .lbl { font-size: 12px; color: var(--muted); }
 .info-grid p { margin-top: 4px; font-size: 14px; }
 .attach-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+.script-hint { font-size: 13px; color: var(--muted); margin: 0; }
+.script-err { font-size: 13px; color: var(--danger, #f56c6c); margin: 8px 0 0; }
 @media (max-width: 640px) { .stat-grid { grid-template-columns: 1fr 1fr; } }
 </style>

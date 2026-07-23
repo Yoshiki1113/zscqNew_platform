@@ -11,7 +11,7 @@
           :loading="batchAsring"
           @click="batchAsr"
         >
-          一键ASR转写
+          {{ batchAsring && asrProgress.total ? `ASR ${asrProgress.current}/${asrProgress.total}` : '一键ASR转写' }}
         </el-button>
         <el-button
           v-if="!isCompany"
@@ -21,7 +21,7 @@
           :loading="rematching"
           @click="rematchScripts"
         >
-          一键台词比对
+          {{ rematching && rematchProgress.total ? `比对 ${rematchProgress.current}/${rematchProgress.total}` : '一键台词比对' }}
         </el-button>
         <el-button
           v-if="!isCompany"
@@ -102,11 +102,11 @@
     <!-- 筛选 + 排序 -->
     <div class="card" v-if="!hideChrome || isCompany">
       <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <el-select v-if="!isCompany" v-model="filters.taskId" placeholder="选择任务" clearable filterable style="width:240px;" @change="onFilterChange">
+        <el-select v-if="!isCompany" v-model="filters.taskId" placeholder="选择任务" clearable filterable style="width:320px;" @change="onFilterChange">
           <el-option
             v-for="t in taskOptions"
             :key="t.id"
-            :label="`#${t.id} ${t.keyword}（${formatDateTimeShort(t.created_at)}）`"
+            :label="taskOptionLabel(t)"
             :value="t.id"
           />
         </el-select>
@@ -170,6 +170,9 @@
               <el-icon><WarningFilled /></el-icon> <strong>{{ item.infringement_reason }}</strong>
             </div>
             <div class="evidence-title">{{ item.title || '无标题' }}</div>
+            <div v-if="item.search_keyword" style="margin-bottom:6px;">
+              <el-tag size="small" type="primary" effect="plain">关键词：{{ item.search_keyword }}</el-tag>
+            </div>
             <div class="text-muted" style="font-size:12px;margin-bottom:6px;">
               博主: <strong style="color:var(--text);">{{ item.blogger_name || '未知' }}</strong>
               <code class="font-mono" style="font-size:11px;margin-left:6px;color:var(--muted);">{{ item.video_channel_id?.slice(0,16) || '' }}{{ item.video_channel_id ? '...' : '' }}</code>
@@ -277,6 +280,8 @@ const batchPushingCompany = ref(false)
 const pushingAllCompany = ref(false)
 const rematching = ref(false)
 const batchAsring = ref(false)
+const asrProgress = reactive({ current: 0, total: 0 })
+const rematchProgress = reactive({ current: 0, total: 0 })
 
 const policeEligibleCount = computed(() =>
   selectedIds.value.filter(id => {
@@ -299,7 +304,10 @@ async function loadTasks() {
   try {
     const { data } = await taskApi.list({ page: 1, page_size: 100, phase: 2 })
     taskOptions.value = data.items || []
-    if (taskOptions.value.length && !filters.taskId) {
+    const qTid = Number(route.query.task_id) || 0
+    if (qTid && taskOptions.value.some(t => t.id === qTid)) {
+      filters.taskId = qTid
+    } else if (taskOptions.value.length && !filters.taskId) {
       filters.taskId = taskOptions.value[0].id
     }
   } catch {
@@ -375,8 +383,10 @@ async function fetchData() {
 function onFilterChange() { page.value = 1; fetchData() }
 function resetFilter() { filters.reviewStatus = ''; filters.keyword = ''; filters.blogger = ''; sortBy.value = 'newest'; page.value = 1; fetchData() }
 function openDetail(id) {
-  if (isCompany.value) router.push(`/company/evidence/${id}`)
-  else router.push(`/collector/evidence/${id}`)
+  const query = {}
+  if (filters.taskId) query.task_id = String(filters.taskId)
+  if (isCompany.value) router.push({ path: `/company/evidence/${id}`, query })
+  else router.push({ path: `/collector/evidence/${id}`, query })
 }
 
 async function pushOneCompany(item) {
@@ -458,6 +468,14 @@ async function pushBatchCompany() {
   }
 }
 
+function taskOptionLabel(t) {
+  const drama = (t.drama_name || '').trim()
+  const kw = (t.keyword || '').trim()
+  const title = drama || (kw && !kw.toUpperCase().startsWith('WO-') ? kw : '') || kw || '未命名'
+  if (t.order_no) return `${title} · ${t.order_no}（#${t.id}）`
+  return `${title} · #${t.id}`
+}
+
 function _evidenceScopeBody() {
   const body = {}
   if (workOrderId.value) body.work_order_id = workOrderId.value
@@ -468,35 +486,71 @@ function _evidenceScopeBody() {
 
 async function batchAsr() {
   batchAsring.value = true
+  asrProgress.current = 0
+  asrProgress.total = 0
   try {
-    const { data } = await evidenceApi.batchAsr(_evidenceScopeBody())
-    if (!data.total) {
-      ElMessage.info(data.message || '没有需要转写的证据')
-    } else {
-      ElMessage.success(data.message || `ASR 转写完成：成功 ${data.transcribed || 0} 条`)
+    const { data: cand } = await evidenceApi.batchAsrCandidates(_evidenceScopeBody())
+    const ids = cand?.ids || []
+    if (!ids.length) {
+      ElMessage.info(cand?.message || '没有需要转写的证据')
+      return
     }
+    asrProgress.total = ids.length
+    let ok = 0
+    let fail = 0
+    for (let i = 0; i < ids.length; i++) {
+      asrProgress.current = i + 1
+      try {
+        const { data } = await evidenceApi.asrOne(ids[i])
+        if (data?.ok) ok += 1
+        else fail += 1
+      } catch {
+        fail += 1
+      }
+    }
+    ElMessage.success(`ASR 完成：成功 ${ok}，失败 ${fail}，共 ${ids.length} 条`)
     fetchData()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '一键ASR转写失败')
   } finally {
     batchAsring.value = false
+    asrProgress.current = 0
+    asrProgress.total = 0
   }
 }
 
 async function rematchScripts() {
   rematching.value = true
+  rematchProgress.current = 0
+  rematchProgress.total = 0
   try {
-    const { data } = await evidenceApi.rematchScripts(_evidenceScopeBody())
-    if (!data.total_candidates) {
-      ElMessage.info(data.message || '没有需要补比对的证据')
-    } else {
-      ElMessage.success(data.message || '补比对完成')
+    const { data: cand } = await evidenceApi.rematchCandidates(_evidenceScopeBody())
+    const ids = cand?.ids || []
+    if (!ids.length) {
+      ElMessage.info(cand?.message || '没有需要补比对的证据')
+      return
     }
+    rematchProgress.total = ids.length
+    let ok = 0
+    let fail = 0
+    for (let i = 0; i < ids.length; i++) {
+      rematchProgress.current = i + 1
+      try {
+        const { data } = await evidenceApi.rematchOne(ids[i])
+        if (data?.ok) ok += 1
+        else fail += 1
+      } catch {
+        fail += 1
+      }
+    }
+    ElMessage.success(`台词比对完成：成功 ${ok}，失败 ${fail}，共 ${ids.length} 条`)
     fetchData()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '一键台词比对失败')
   } finally {
     rematching.value = false
+    rematchProgress.current = 0
+    rematchProgress.total = 0
   }
 }
 

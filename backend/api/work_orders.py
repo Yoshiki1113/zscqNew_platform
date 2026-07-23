@@ -11,7 +11,7 @@ from typing import Optional
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import SCRIPTS_DIR, PROJECT_ROOT
@@ -27,6 +27,40 @@ WORK_ORDER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _SAFE_NAME_RE = re.compile(r'[\\/:*?"<>|]+')
 # 主名（别名）/ 主名(别名) → 只保留括号外主名
 _PAREN_ALIAS_RE = re.compile(r"[（(][^）)]*[）)]")
+# 链接池批次名 / 任务 keyword：WO-{order_no}
+_WO_KEYWORD_RE = re.compile(r"^WO-(.+)$", re.IGNORECASE)
+
+
+async def resolve_work_order_id_from_keyword(db: AsyncSession, keyword: str) -> Optional[int]:
+    """从 keyword/批次名解析工单 ID。支持 WO-{order_no}；否则按剧名精确匹配。"""
+    name = (keyword or "").strip()
+    if not name:
+        return None
+    m = _WO_KEYWORD_RE.match(name)
+    if m:
+        order_no = m.group(1).strip()
+        if order_no:
+            wo = (
+                await db.execute(select(WorkOrder).where(WorkOrder.order_no == order_no))
+            ).scalar_one_or_none()
+            if wo:
+                return wo.id
+    wo = (
+        await db.execute(select(WorkOrder).where(WorkOrder.drama_name == name).order_by(WorkOrder.id.desc()))
+    ).scalars().first()
+    return wo.id if wo else None
+
+
+async def ensure_task_work_order_id(db: AsyncSession, task: Task) -> Optional[int]:
+    """任务缺 work_order_id 时按 keyword 回填并返回工单 ID。"""
+    if not task:
+        return None
+    if task.work_order_id:
+        return task.work_order_id
+    woid = await resolve_work_order_id_from_keyword(db, task.keyword or "")
+    if woid:
+        task.work_order_id = woid
+    return woid
 
 
 def _safe_keyword(name: str) -> str:
@@ -54,17 +88,46 @@ def _decode_text_bytes(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _install_script_text(keyword: str, text: str) -> Path:
-    """写入 SCRIPTS_DIR/{keyword}/_script_raw.txt，供 ASR 比对。"""
-    kw = _safe_keyword(keyword)
-    if not kw:
-        raise ValueError("关键词为空")
-    script_dir = SCRIPTS_DIR / kw
-    script_dir.mkdir(parents=True, exist_ok=True)
-    dest = script_dir / "_script_raw.txt"
-    body = text.strip()
-    dest.write_text(body + ("\n" if body else ""), encoding="utf-8")
-    return dest
+def _install_script_text(keyword: str, text: str, *, source_hash: str = "", work_order_id: int | None = None) -> Path:
+    """写入关键词台词库：_full.txt + _script_raw.txt（原文，不清洗）。"""
+    from engine.script_clean_jobs import install_full_text
+
+    return install_full_text(
+        keyword,
+        text,
+        source_hash=source_hash,
+        work_order_id=work_order_id,
+        keyword=keyword,
+    )
+
+
+def _install_script_bytes(
+    keyword: str,
+    data: bytes,
+    filename: str,
+    *,
+    work_order_id: int | None = None,
+) -> tuple[str, str]:
+    """抽取并装入全文库，同时保存 _source。返回 (source_hash, text)。"""
+    from engine.script_clean_jobs import install_full_text, save_source_bytes, sha256_bytes
+    from weixin.asr.script_cleaner import extract_script_bytes
+
+    source_hash = sha256_bytes(data)
+    ext = Path(filename or "script.txt").suffix.lower() or ".txt"
+    text = extract_script_bytes(data, filename or "script.txt")
+    if not (text or "").strip() and ext in (".txt", ".text"):
+        text = _decode_text_bytes(data)
+    if not (text or "").strip():
+        raise ValueError("抽取台词为空")
+    save_source_bytes(keyword, data, ext)
+    install_full_text(
+        keyword,
+        text,
+        source_hash=source_hash,
+        work_order_id=work_order_id,
+        keyword=keyword,
+    )
+    return source_hash, text
 
 
 def _parse_keywords_from_excel(content: bytes) -> list[str]:
@@ -662,9 +725,14 @@ async def _refresh_work_order_stats(db: AsyncSession, work_order_id: int) -> Non
 
 
 def _wo_to_dict(wo: WorkOrder, attachments: list | None = None) -> dict:
-    from engine.script_clean_jobs import SCRIPT_STATUS_LABELS
+    from engine.script_clean_jobs import (
+        SCRIPT_STATUS_LABELS,
+        library_mode_label,
+        library_mode_of,
+    )
 
     script_status = getattr(wo, "script_status", None) or "none"
+    lib_mode = library_mode_of(wo.drama_name) if wo.drama_name else ""
     return {
         "id": wo.id,
         "order_no": wo.order_no,
@@ -681,6 +749,8 @@ def _wo_to_dict(wo: WorkOrder, attachments: list | None = None) -> dict:
         "pushed_count": wo.pushed_count or 0,
         "script_status": script_status,
         "script_status_label": SCRIPT_STATUS_LABELS.get(script_status, script_status),
+        "library_mode": lib_mode,
+        "library_mode_label": library_mode_label(lib_mode),
         "script_source_hash": getattr(wo, "script_source_hash", None) or "",
         "script_cleaned_at": str(wo.script_cleaned_at) if getattr(wo, "script_cleaned_at", None) else "",
         "script_error": getattr(wo, "script_error", None) or "",
@@ -693,42 +763,76 @@ def _wo_to_dict(wo: WorkOrder, attachments: list | None = None) -> dict:
     }
 
 
+def _pushed_to_company_wo_ids_subq():
+    """工单 ID：其下至少有一条已推送公司核查池的证据。"""
+    return (
+        select(Task.work_order_id)
+        .join(EvidenceRecord, EvidenceRecord.task_id == Task.id)
+        .where(
+            Task.work_order_id.isnot(None),
+            EvidenceRecord.pushed_to_company.is_(True),
+        )
+        .distinct()
+    )
+
+
+def _apply_work_order_list_filters(stmt, *, status: str, queue: str, assigned_to: str, has_company_pushed: bool):
+    if status:
+        stmt = stmt.where(WorkOrder.status == status)
+    if queue == "pending":
+        stmt = stmt.where(WorkOrder.status.in_(["submitted", "collecting", "partial"]))
+    elif queue == "mine" and assigned_to:
+        stmt = stmt.where(
+            WorkOrder.assigned_to == assigned_to,
+            WorkOrder.status.in_(["submitted", "collecting", "partial"]),
+        )
+    if has_company_pushed:
+        stmt = stmt.where(WorkOrder.id.in_(_pushed_to_company_wo_ids_subq()))
+    return stmt
+
+
 @router.get("/work-orders")
 async def list_work_orders(
     status: str = Query("", max_length=20),
     queue: str = Query("", description="pending|mine|all"),
     assigned_to: str = Query(""),
+    has_company_pushed: bool = Query(False, description="仅返回已有推送公司核查池证据的工单"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    base = select(WorkOrder)
-    if status:
-        base = base.where(WorkOrder.status == status)
-    if queue == "pending":
-        base = base.where(WorkOrder.status.in_(["submitted", "collecting", "partial"]))
-    elif queue == "mine" and assigned_to:
-        base = base.where(
-            WorkOrder.assigned_to == assigned_to,
-            WorkOrder.status.in_(["submitted", "collecting", "partial"]),
-        )
+    filters = dict(status=status, queue=queue, assigned_to=assigned_to, has_company_pushed=has_company_pushed)
+    base = _apply_work_order_list_filters(select(WorkOrder), **filters)
     base = base.order_by(WorkOrder.priority.desc(), WorkOrder.submitted_at.desc(), WorkOrder.id.desc())
 
-    count_q = select(func.count(WorkOrder.id))
-    if status:
-        count_q = count_q.where(WorkOrder.status == status)
-    if queue == "pending":
-        count_q = count_q.where(WorkOrder.status.in_(["submitted", "collecting", "partial"]))
-    elif queue == "mine" and assigned_to:
-        count_q = count_q.where(
-            WorkOrder.assigned_to == assigned_to,
-            WorkOrder.status.in_(["submitted", "collecting", "partial"]),
-        )
+    count_q = _apply_work_order_list_filters(select(func.count(WorkOrder.id)), **filters)
     total = (await db.execute(count_q)).scalar() or 0
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+
+    wo_ids = [r.id for r in rows]
+    pending_map: dict[int, int] = {}
+    if wo_ids:
+        pending_rows = (
+            await db.execute(
+                select(Task.work_order_id, func.count(EvidenceRecord.id))
+                .join(EvidenceRecord, EvidenceRecord.task_id == Task.id)
+                .where(
+                    Task.work_order_id.in_(wo_ids),
+                    EvidenceRecord.pushed_to_company.is_(True),
+                    or_(
+                        EvidenceRecord.review_status == "",
+                        EvidenceRecord.review_status.is_(None),
+                    ),
+                )
+                .group_by(Task.work_order_id)
+            )
+        ).all()
+        pending_map = {int(wid): int(cnt or 0) for wid, cnt in pending_rows}
+
     items = []
     for r in rows:
         d = _wo_to_dict(r)
+        d["review_pending_count"] = pending_map.get(r.id, 0)
         d["link_pool"] = await _batch_info_for_work_order(db, r)
         items.append(d)
     return {
@@ -820,10 +924,9 @@ async def import_work_order_package(
     submitter: str = Form("公司用户"),
     db: AsyncSession = Depends(get_db),
 ):
-    """新建工单：上传 zip 入库（不清洗台词）。缺台词也建单，仅告知；清洗延后到取证认领。"""
+    """新建工单：上传 zip 入库。缺台词也建单；有台词则抽取全文装库（默认不清洗）。"""
     from engine.script_clean_jobs import (
         SCRIPT_STATUS_NONE,
-        SCRIPT_STATUS_PENDING,
         SCRIPT_STATUS_READY,
         library_ready_for_hash,
         sha256_bytes,
@@ -888,8 +991,17 @@ async def import_work_order_package(
                 script_status = SCRIPT_STATUS_READY
                 script_ready.append(kw)
             else:
-                script_status = SCRIPT_STATUS_PENDING
-                script_pending.append(kw)
+                try:
+                    source_hash, _ = _install_script_bytes(
+                        kw, raw, f"{hit['docx_key']}{ext}"
+                    )
+                    script_status = SCRIPT_STATUS_READY
+                    script_ready.append(kw)
+                except Exception as e:
+                    print(f"[import-package] 装库失败 kw={kw}: {e}")
+                    script_status = SCRIPT_STATUS_NONE
+                    source_hash = sha256_bytes(raw)
+                    missing_script.append(kw)
             att_info = (raw, ext, f"{hit['docx_key']}{ext}", hit["docx_key"])
 
         wo = WorkOrder(
@@ -938,10 +1050,8 @@ async def import_work_order_package(
 
     unused = pairing["unused_docx"]
     parts = [f"已创建 {len(created)} 张工单"]
-    if script_pending:
-        parts.append(f"{len(script_pending)} 部台词待取证端认领后清洗")
     if script_ready:
-        parts.append(f"{len(script_ready)} 部台词已就绪可复用")
+        parts.append(f"{len(script_ready)} 部台词已装库（原文，可选手动清洗）")
     if missing_script:
         parts.append(f"{len(missing_script)} 部缺台词文件（仍已建单）")
     if unused:
@@ -1224,8 +1334,9 @@ async def assign_work_order(
     from engine.script_clean_jobs import (
         SCRIPT_STATUS_PENDING,
         SCRIPT_STATUS_READY,
+        disk_library_ready,
         library_ready_for_hash,
-        schedule_clean_work_order,
+        schedule_install_full_work_order,
     )
 
     wo = (await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))).scalar_one_or_none()
@@ -1239,25 +1350,30 @@ async def assign_work_order(
         wo.started_at = datetime.now()
     wo.updated_at = datetime.now()
 
-    # 认领时：有源文件且未就绪 → 触发异步清洗；哈希已命中则直接 ready
+    # 认领：不再自动 LLM 清洗；有比对库则 ready；旧 pending 触发全文装库
     script_status = getattr(wo, "script_status", None) or "none"
     source_hash = getattr(wo, "script_source_hash", None) or ""
-    if script_status not in ("none",) and wo.drama_name:
+    need_install = False
+    if wo.drama_name and disk_library_ready(wo.drama_name):
+        wo.script_status = SCRIPT_STATUS_READY
+        if not wo.script_cleaned_at:
+            wo.script_cleaned_at = datetime.now()
+        wo.script_error = ""
+    elif script_status not in ("none",) and wo.drama_name:
         if source_hash and library_ready_for_hash(wo.drama_name, source_hash):
             wo.script_status = SCRIPT_STATUS_READY
             if not wo.script_cleaned_at:
                 wo.script_cleaned_at = datetime.now()
             wo.script_error = ""
         elif script_status in (SCRIPT_STATUS_PENDING, "failed", "cleaning"):
-            # cleaning 卡住时也允许重新调度
-            if script_status != "cleaning":
-                wo.script_status = SCRIPT_STATUS_PENDING
+            wo.script_status = SCRIPT_STATUS_PENDING
+            need_install = True
 
     await db.commit()
     await db.refresh(wo)
 
-    if (getattr(wo, "script_status", None) or "") in (SCRIPT_STATUS_PENDING, "cleaning"):
-        schedule_clean_work_order(wo.id)
+    if need_install:
+        schedule_install_full_work_order(wo.id)
 
     return _wo_to_dict(wo)
 
@@ -1270,10 +1386,8 @@ async def upload_attachment(
     db: AsyncSession = Depends(get_db),
 ):
     from engine.script_clean_jobs import (
-        SCRIPT_STATUS_PENDING,
         SCRIPT_STATUS_READY,
         library_ready_for_hash,
-        schedule_clean_work_order,
         sha256_bytes,
     )
 
@@ -1290,34 +1404,46 @@ async def upload_attachment(
     async with aiofiles.open(dest_path, "wb") as fh:
         await fh.write(content)
 
-    # 剧本：只存附件与哈希，清洗延后（认领或此处触发）
+    # 剧本：抽取全文装入关键词台词库（默认不清洗）
     if file_type == "script" and wo.drama_name:
         lower = safe_name.lower()
-        if lower.endswith((".doc", ".docx")):
-            source_hash = sha256_bytes(content)
-            wo.script_source_hash = source_hash
-            if library_ready_for_hash(wo.drama_name, source_hash):
-                wo.script_status = SCRIPT_STATUS_READY
-                wo.script_cleaned_at = datetime.now()
-                wo.script_error = ""
-            else:
-                wo.script_status = SCRIPT_STATUS_PENDING
-                wo.script_cleaned_at = None
-                wo.script_error = ""
-        elif lower.endswith(".txt") or lower.endswith(".zip"):
-            # 兼容直接传纯文本 / txt：仍即时写入 raw（已是对白）
-            script_text = ""
-            if lower.endswith(".zip"):
+        try:
+            if lower.endswith((".doc", ".docx", ".txt", ".text")):
+                source_hash = sha256_bytes(content)
+                if library_ready_for_hash(wo.drama_name, source_hash):
+                    wo.script_status = SCRIPT_STATUS_READY
+                    wo.script_source_hash = source_hash
+                    wo.script_cleaned_at = datetime.now()
+                    wo.script_error = ""
+                else:
+                    source_hash, _ = _install_script_bytes(
+                        wo.drama_name,
+                        content,
+                        safe_name,
+                        work_order_id=wo.id,
+                    )
+                    wo.script_status = SCRIPT_STATUS_READY
+                    wo.script_source_hash = source_hash
+                    wo.script_cleaned_at = datetime.now()
+                    wo.script_error = ""
+            elif lower.endswith(".zip"):
                 zidx = _index_zip_scripts(content)
                 chunks = [_decode_text_bytes(v) for v in zidx.values()]
                 script_text = "\n\n".join(chunks)
-            else:
-                script_text = _decode_text_bytes(content)
-            _install_script_text(wo.drama_name, script_text)
-            wo.script_status = SCRIPT_STATUS_READY
-            wo.script_source_hash = sha256_bytes(content)
-            wo.script_cleaned_at = datetime.now()
-            wo.script_error = ""
+                source_hash = sha256_bytes(content)
+                _install_script_text(
+                    wo.drama_name,
+                    script_text,
+                    source_hash=source_hash,
+                    work_order_id=wo.id,
+                )
+                wo.script_status = SCRIPT_STATUS_READY
+                wo.script_source_hash = source_hash
+                wo.script_cleaned_at = datetime.now()
+                wo.script_error = ""
+        except Exception as e:
+            wo.script_status = "failed"
+            wo.script_error = str(e)[:500]
 
     att = WorkOrderAttachment(
         work_order_id=work_order_id,
@@ -1339,9 +1465,6 @@ async def upload_attachment(
     await db.commit()
     await db.refresh(wo)
 
-    if file_type == "script" and (getattr(wo, "script_status", None) or "") == SCRIPT_STATUS_PENDING:
-        schedule_clean_work_order(wo.id)
-
     atts = (
         await db.execute(
             select(WorkOrderAttachment).where(WorkOrderAttachment.work_order_id == work_order_id)
@@ -1359,6 +1482,49 @@ async def upload_attachment(
     ])
     if link_import is not None:
         data["link_import"] = link_import
+    return data
+
+
+@router.post("/work-orders/{work_order_id}/clean-script")
+async def clean_work_order_script_api(
+    work_order_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """手动清洗：保留旁白+对白，覆盖关键词比对库。"""
+    from engine.script_clean_jobs import (
+        SCRIPT_STATUS_CLEANING,
+        SCRIPT_STATUS_READY,
+        clean_work_order_script,
+        disk_library_ready,
+        full_script_path,
+    )
+
+    wo = (await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))).scalar_one_or_none()
+    if not wo:
+        raise HTTPException(404, "工单不存在")
+    if not wo.drama_name:
+        raise HTTPException(400, "工单无剧名/关键词")
+    if not disk_library_ready(wo.drama_name) and not full_script_path(wo.drama_name).is_file():
+        raise HTTPException(400, "尚无台词原文，请先上传剧本")
+
+    status = getattr(wo, "script_status", None) or ""
+    if status == SCRIPT_STATUS_CLEANING:
+        return {**_wo_to_dict(wo), "message": "清洗进行中，请稍候刷新"}
+
+    wo.script_status = SCRIPT_STATUS_CLEANING
+    wo.script_error = ""
+    wo.updated_at = datetime.now()
+    await db.commit()
+
+    await clean_work_order_script(work_order_id)
+
+    wo = (await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))).scalar_one()
+    data = _wo_to_dict(wo)
+    mode = data.get("library_mode_label") or data.get("library_mode") or ""
+    if (getattr(wo, "script_status", None) or "") == SCRIPT_STATUS_READY:
+        data["message"] = f"清洗完成（{mode or '旁白+对白'}）"
+    else:
+        data["message"] = getattr(wo, "script_error", None) or "清洗失败"
     return data
 
 

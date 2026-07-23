@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import DEFAULT_MAX_VIDEOS, DEFAULT_HOLD_SECONDS, DEFAULT_CAPTURE_METHOD, DEFAULT_PHONE_PORT
 from database import get_db
-from models import Task, EvidenceRecord, ReviewLog, VideoLink, InfringementClue
+from models import Task, EvidenceRecord, ReviewLog, VideoLink, InfringementClue, WorkOrder
 from engine import get_scheduler
 
 
@@ -56,6 +56,8 @@ class TaskResponse(BaseModel):
     collect_mode: str = "link_first"
     phase: int = 1
     work_order_id: Optional[int] = None
+    drama_name: str = ""
+    order_no: str = ""
     evidence_count: int = 0
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -73,10 +75,22 @@ class TaskListResponse(BaseModel):
     page_size: int
 
 
-def _task_to_response(task: Task, evidence_count: int = 0, orphans_deleted: int = 0) -> TaskResponse:
+def _task_to_response(
+    task: Task,
+    evidence_count: int = 0,
+    orphans_deleted: int = 0,
+    drama_name: str = "",
+    order_no: str = "",
+) -> TaskResponse:
+    kw = task.keyword or ""
+    drama = (drama_name or "").strip()
+    ono = (order_no or "").strip()
+    # keyword 若是 WO- 批次名且无剧名，仍展示原 keyword；有剧名则 drama_name 优先用于前端
+    if not drama and kw and not kw.upper().startswith("WO-"):
+        drama = kw
     return TaskResponse(
         id=task.id,
-        keyword=task.keyword,
+        keyword=kw,
         status=task.status,
         device_id=task.device_id or "",
         max_videos=task.max_videos,
@@ -87,6 +101,8 @@ def _task_to_response(task: Task, evidence_count: int = 0, orphans_deleted: int 
         collect_mode=task.collect_mode or "link_first",
         phase=task.phase if task.phase else 1,
         work_order_id=task.work_order_id,
+        drama_name=drama,
+        order_no=ono,
         evidence_count=evidence_count,
         started_at=task.started_at,
         finished_at=task.finished_at,
@@ -94,6 +110,46 @@ def _task_to_response(task: Task, evidence_count: int = 0, orphans_deleted: int 
         error_message=task.error_message or "",
         orphans_deleted=orphans_deleted,
     )
+
+
+async def _wo_meta_map(db: AsyncSession, tasks: list[Task]) -> dict[int, tuple[str, str]]:
+    """work_order_id -> (drama_name, order_no)；并尝试用 keyword=WO-{order_no} 反查。"""
+    meta: dict[int, tuple[str, str]] = {}
+    wo_ids = [t.work_order_id for t in tasks if t.work_order_id]
+    if wo_ids:
+        rows = (await db.execute(
+            select(WorkOrder.id, WorkOrder.drama_name, WorkOrder.order_no).where(
+                WorkOrder.id.in_(list(set(wo_ids)))
+            )
+        )).all()
+        by_id = {wid: ((d or "").strip(), (o or "").strip()) for wid, d, o in rows}
+        for t in tasks:
+            if t.work_order_id and t.work_order_id in by_id:
+                meta[t.id] = by_id[t.work_order_id]
+
+    # keyword 形如 WO-{order_no} 时反查工单
+    need = [t for t in tasks if t.id not in meta]
+    order_nos = []
+    task_to_ono: dict[int, str] = {}
+    for t in need:
+        name = (t.keyword or "").strip()
+        if name.upper().startswith("WO-"):
+            ono = name[3:].strip()
+            if ono:
+                order_nos.append(ono)
+                task_to_ono[t.id] = ono
+    if order_nos:
+        rows = (await db.execute(
+            select(WorkOrder.order_no, WorkOrder.drama_name).where(
+                WorkOrder.order_no.in_(list(set(order_nos)))
+            )
+        )).all()
+        by_ono = {(o or "").strip(): (d or "").strip() for o, d in rows}
+        for tid, ono in task_to_ono.items():
+            drama = by_ono.get(ono, "")
+            if drama:
+                meta[tid] = (drama, ono)
+    return meta
 
 
 async def _get_task_with_count(task_id: int, db: AsyncSession) -> tuple[Task, int]:
@@ -149,13 +205,23 @@ async def list_tasks(
 
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).all()
 
-    items = [_task_to_response(t, ec or 0) for t, ec in rows]
+    tasks = [t for t, _ec in rows]
+    wo_meta = await _wo_meta_map(db, tasks)
+    items = []
+    for t, ec in rows:
+        drama, ono = wo_meta.get(t.id, ("", ""))
+        items.append(_task_to_response(t, ec or 0, drama_name=drama, order_no=ono))
     return TaskListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
     """创建新任务"""
+    work_order_id = body.work_order_id
+    if not work_order_id:
+        from api.work_orders import resolve_work_order_id_from_keyword
+        work_order_id = await resolve_work_order_id_from_keyword(db, body.keyword or "")
+
     task = Task(
         keyword=body.keyword,
         max_videos=body.max_videos,
@@ -165,7 +231,7 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         enable_asr=body.enable_asr,
         skip_search=body.skip_search,
         collect_mode="link_first",
-        work_order_id=body.work_order_id,
+        work_order_id=work_order_id,
         status="pending",
         created_at=datetime.now(),
     )
@@ -179,7 +245,9 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
 async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
     """任务详情"""
     task, evidence_count = await _get_task_with_count(task_id, db)
-    return _task_to_response(task, evidence_count or 0)
+    wo_meta = await _wo_meta_map(db, [task])
+    drama, ono = wo_meta.get(task.id, ("", ""))
+    return _task_to_response(task, evidence_count or 0, drama_name=drama, order_no=ono)
 
 
 @router.delete("/tasks/{task_id}", status_code=204)

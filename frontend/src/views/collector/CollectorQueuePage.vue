@@ -12,7 +12,7 @@
     <el-alert
       type="info"
       :closable="false"
-      title="流程：认领（自动清洗台词）→ 一阶段搜链 → 链接池二阶段（无台词则跳过比对，可后补一键比对）→ 推送公司核查"
+      title="流程：认领 → 一阶段搜链 → 链接池二阶段（上传即原文比对，可选手动清洗旁白+对白）→ 推送公司核查"
       style="margin-bottom:16px;"
     />
 
@@ -37,6 +37,9 @@
             <el-tag :type="scriptTag(wo.script_status)" size="small" effect="plain">
               {{ wo.script_status_label || scriptLabel(wo.script_status) }}
             </el-tag>
+            <el-tag v-if="wo.library_mode_label" size="small" effect="plain">
+              {{ wo.library_mode_label }}
+            </el-tag>
             <el-tag v-if="wo.priority" type="danger" size="small" effect="plain">P{{ wo.priority }}</el-tag>
           </div>
           <div class="drama">{{ wo.drama_name }}</div>
@@ -52,6 +55,13 @@
             size="small"
             @click="assign(wo)"
           >认领</el-button>
+          <el-button
+            v-if="canClean(wo)"
+            size="small"
+            type="warning"
+            :loading="cleaning === wo.id"
+            @click="cleanScript(wo)"
+          >清洗</el-button>
           <el-button
             v-if="canStartPhase1(wo)"
             type="warning"
@@ -95,6 +105,7 @@ const items = ref([])
 const loading = ref(false)
 const importing = ref(null)
 const startingPhase1 = ref(null)
+const cleaning = ref(null)
 const pendingCount = ref(0)
 const mineCount = ref(0)
 const deviceOnline = ref(false)
@@ -120,12 +131,17 @@ function scriptTag(s) {
 function scriptLabel(s) {
   const map = {
     ready: '台词就绪',
-    pending: '待清洗',
+    pending: '待装库',
     cleaning: '清洗中',
     failed: '清洗失败',
     none: '缺台词',
   }
   return map[s] || (s || '缺台词')
+}
+
+function canClean(wo) {
+  const s = wo?.script_status
+  return s === 'ready' || s === 'failed' || s === 'pending'
 }
 
 function canStartPhase1(wo) {
@@ -181,6 +197,19 @@ async function assign(wo) {
     fetchOrders()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '认领失败')
+  }
+}
+
+async function cleanScript(wo) {
+  cleaning.value = wo.id
+  try {
+    const { data } = await workOrderApi.cleanScript(wo.id)
+    ElMessage.success(data.message || '清洗完成')
+    fetchOrders()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '清洗失败')
+  } finally {
+    cleaning.value = null
   }
 }
 
